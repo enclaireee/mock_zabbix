@@ -2,22 +2,14 @@
 # Station registry — defined ONCE here, used by every asset class.
 # Each asset catalog (plc/hmi/switch/process) generates one host per site via its
 # `host_template`. Add a station here → it appears in all asset classes, on the
-# Jakarta geomap, and in the simulator. That's the only place to edit for "more rows".
+# geomap, and in the simulator. That's the only place to edit for "more rows".
 #
 # Fields: code (host-name token), name (display), location/lat/lon/city (inventory
 # + geomap), and per-site attributes referenced by host_template macros
 # (grade = HMI hardware tier, p_out_sp = regulated outlet pressure setpoint barg).
 # =============================================================================
 sites:
-  - { code: MKR, name: "Muara Karang",   location: "Stasiun Muara Karang, Pluit, Jakarta Utara",   lat: "-6.1086", lon: "106.7686", city: "Jakarta Utara",   grade: enterprise, p_out_sp: "12" }
-  - { code: TPK, name: "Tanjung Priok",  location: "Stasiun Tanjung Priok, Jakarta Utara",         lat: "-6.1045", lon: "106.8809", city: "Jakarta Utara",   grade: enterprise, p_out_sp: "14" }
-  - { code: SNY, name: "Sunter",         location: "Stasiun Sunter, Jakarta Utara",                lat: "-6.1410", lon: "106.8689", city: "Jakarta Utara",   grade: commercial, p_out_sp: "9"  }
-  - { code: KMY, name: "Kemayoran",      location: "Stasiun Kemayoran, Jakarta Pusat",             lat: "-6.1632", lon: "106.8540", city: "Jakarta Pusat",   grade: commercial, p_out_sp: "8"  }
-  - { code: GRG, name: "Grogol",         location: "Stasiun Grogol Petamburan, Jakarta Barat",     lat: "-6.1610", lon: "106.7894", city: "Jakarta Barat",   grade: commercial, p_out_sp: "9"  }
-  - { code: PGD, name: "Pulogadung",     location: "Stasiun Pulogadung, Jakarta Timur",            lat: "-6.1869", lon: "106.9116", city: "Jakarta Timur",   grade: enterprise, p_out_sp: "10" }
-  - { code: CKG, name: "Cakung",         location: "Stasiun Cakung, Jakarta Timur",                lat: "-6.1818", lon: "106.9514", city: "Jakarta Timur",   grade: commercial, p_out_sp: "10" }
-  - { code: SLP, name: "Setiabudi",      location: "Stasiun Setiabudi (Kuningan), Jakarta Selatan", lat: "-6.2200", lon: "106.8300", city: "Jakarta Selatan", grade: enterprise, p_out_sp: "11" }
-  - { code: CLD, name: "Cilandak",       location: "Stasiun Cilandak, Jakarta Selatan",            lat: "-6.2880", lon: "106.7990", city: "Jakarta Selatan", grade: commercial, p_out_sp: "7"  }
-  - { code: TGR, name: "Tangerang CGS",  location: "City Gate Station Batuceper, Tangerang",       lat: "-6.1783", lon: "106.6319", city: "Tangerang",       grade: enterprise, p_out_sp: "16" }
-  - { code: BKS, name: "Bekasi CGS",     location: "City Gate Station Medan Satria, Bekasi",       lat: "-6.2200", lon: "106.9750", city: "Bekasi",          grade: enterprise, p_out_sp: "15" }
-  - { code: DPK, name: "Depok",          location: "Stasiun Cimanggis, Depok",                     lat: "-6.3700", lon: "106.8456", city: "Depok",           grade: commercial, p_out_sp: "9"  }
+  # ponytail: TBB name/coords are a best-guess ("Tanjung …", central Sumatra) — confirm & tune per site.
+  - { code: GRS, name: "Grissik",      location: "Grissik Gas Plant, Sungai Lilin, Musi Banyuasin, Sumatra Selatan", lat: "-2.0500", lon: "103.4300", city: "Musi Banyuasin", grade: enterprise, p_out_sp: "16" }
+  - { code: TBB, name: "Tanjung Batu", location: "Stasiun Tanjung Batu, Sumatra Tengah (Grissik–Duri line)",          lat: "0.5000",  lon: "101.8000", city: "Riau",           grade: enterprise, p_out_sp: "14" }
+  - { code: BJN, name: "Bojonegara",   location: "Stasiun Bojonegara, Cilegon/Serang, Banten",                       lat: "-5.9020", lon: "106.0780", city: "Cilegon",        grade: enterprise, p_out_sp: "15" }

@@ -41,9 +41,7 @@ def cmd_check() -> None:
                 else:
                     assert v == st.value, f"{p.key}: enum value mismatch"
                 n += 1
-            # over 500 sticky rolls at 0.5 we should visit more than one state
             assert len(seen_bands) >= 1
-    # trigger expressions reference a real key
     for a in assets:
         keys = {p.key for p in a.parameters}
         for p in a.parameters:

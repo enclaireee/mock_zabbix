@@ -9,7 +9,6 @@ host_group: "Network/Industrial"
 template_name: "Template OT Switch Router"
 template_group: "Templates/OT"
 
-# One industrial switch per site (see catalog/sites.yml).
 host_template:
   tech: "SW-{code}-IE01"
   name: "{name} — Industrial Switch (ring uplink)"
@@ -67,8 +66,6 @@ parameters:
       good: [0, 0]
       underperform: [1, 40]
       failed: [300, 2000]
-      weights: [good, underperform, failed]
-      jitter: 0
     triggers:
       - { op: ">=", value: 1,   severity: warning, label: "CRC/FCS errors climbing — TCP retransmits" }
       - { op: ">=", value: 300, severity: high,    label: "Error rate >5% — link integrity lost" }
@@ -87,8 +84,6 @@ parameters:
       good: [0, 0]
       underperform: [1, 50]
       failed: [500, 5000]
-      weights: [good, underperform, failed]
-      jitter: 0
     triggers:
       - { op: ">=", value: 1,   severity: warning, label: "Queue discards rising — backplane congestion" }
       - { op: ">=", value: 500, severity: high,    label: "Discard spike — broadcast storm" }
