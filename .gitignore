@@ -5,3 +5,5 @@ __pycache__/
 zbx_db_data/
 docs
 README.md
+.env.example
+
