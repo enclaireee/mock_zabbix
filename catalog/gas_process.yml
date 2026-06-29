@@ -1,0 +1,426 @@
+# =============================================================================
+# Asset Class: Gas Process / SCADA (the values an HMI actually displays)
+# A metering & regulating + compressor station: pressures, flow, gas quality,
+# control valves, fire & gas safety, and compressor train health.
+#
+# Collection reality: these are PLC process tags (Data Blocks / Merker), read via
+# S7comm -> Node-RED -> Zabbix Trapper (the report's recommended bridge). The HMI
+# (Wonderware) reads the same tags off the PLC for visualization.
+# Engineering bands follow typical transmission-station ranges; tune per site.
+# =============================================================================
+asset_class: "Gas Process (SCADA)"
+host_group: "OT/Process"
+template_name: "Template OT Gas Process"
+template_group: "Templates/OT"
+
+# One process unit per site (see catalog/sites.yml). {$P_OUT_SP} comes from the site.
+host_template:
+  tech: "PROC-{code}"
+  name: "{name} — Gas Metering, Regulating & Compressor Process"
+  macros: { "{$SITE}": "{code}", "{$P_OUT_SP}": "{p_out_sp}", "{$LEL_ALARM}": "5" }
+
+parameters:
+  # ── Pressure & flow ────────────────────────────────────────────────────
+  - key: "proc.pressure.inlet"
+    name: "Inlet Pressure (PT-101)"
+    value_type: float
+    units: "barg"
+    interval: "5s"
+    component: "Pressure"
+    collection: "S7comm via Node-RED (PLC DB, AI 4-20mA)"
+    failure_mode: "Upstream transmission pressure loss, regulator failure, line rupture"
+    source: "Transmission station P&ID, typical 20-35 barg"
+    sim:
+      kind: numeric
+      good: [28, 34]
+      underperform: [22, 27.5]
+      failed: [15, 21]
+      weights: [good, underperform, failed]
+      jitter: 0.3
+    triggers:
+      - { op: "<=", value: 27, severity: warning, label: "Inlet pressure low" }
+      - { op: "<=", value: 20, severity: high,    label: "Inlet pressure LOW-LOW — supply integrity" }
+      - { op: ">=", value: 40, severity: high,    label: "Inlet overpressure — relief valve risk" }
+
+  - key: "proc.pressure.outlet"
+    name: "Outlet/Regulated Pressure (PT-201)"
+    value_type: float
+    units: "barg"
+    interval: "5s"
+    component: "Pressure"
+    collection: "S7comm via Node-RED (PLC DB, AI 4-20mA)"
+    failure_mode: "Pressure regulator drift/failure, downstream demand swing"
+    source: "Letdown station setpoint {$P_OUT_SP}, ±1 barg deadband"
+    sim:
+      kind: numeric
+      good: [11, 13]
+      underperform: [9, 10.9]
+      failed: [6, 8.5]
+      weights: [good, underperform, failed]
+      jitter: 0.2
+    triggers:
+      - { op: "<=", value: 10, severity: warning, label: "Outlet pressure below setpoint" }
+      - { op: "<=", value: 8,  severity: high,    label: "Outlet pressure LOW-LOW — customer supply risk" }
+      - { op: ">=", value: 16, severity: high,    label: "Outlet overpressure — regulator passing" }
+
+  - key: "proc.dp.filter"
+    name: "Filter Differential Pressure (PDT-301)"
+    value_type: float
+    units: "bar"
+    interval: "30s"
+    component: "Filtration"
+    collection: "S7comm via Node-RED (PLC DB, AI 4-20mA)"
+    failure_mode: "Filter element loading with dust/liquids, slug carryover"
+    source: "Filter-separator dP, clean <0.3 bar / change-out at 0.6 bar"
+    sim:
+      kind: numeric
+      good: [0.05, 0.3]
+      underperform: [0.31, 0.6]
+      failed: [0.61, 1.2]
+      weights: [good, underperform, failed]
+      jitter: 0.02
+    triggers:
+      - { op: ">=", value: 0.3, severity: warning, label: "Filter element loading" }
+      - { op: ">=", value: 0.6, severity: high,    label: "Filter blocked — change element" }
+
+  - key: "proc.flow.rate"
+    name: "Gas Flow Rate (FT-401, custody)"
+    value_type: float
+    units: "MMSCFD"
+    interval: "5s"
+    component: "Metering"
+    collection: "S7comm via Node-RED (ultrasonic/turbine meter, PLC DB)"
+    failure_mode: "No-flow / line pack depletion, meter fault, valve closure"
+    source: "Custody metering skid, station rated ~30 MMSCFD"
+    sim:
+      kind: numeric
+      good: [8, 30]
+      underperform: [2, 7.9]
+      failed: [0, 1.9]
+      weights: [good, underperform, failed]
+      jitter: 0.6
+    triggers:
+      - { op: "<=", value: 7, severity: warning, label: "Flow below normal range" }
+      - { op: "<=", value: 1, severity: high,    label: "No flow — supply interruption" }
+
+  - key: "proc.temp.gas"
+    name: "Gas Temperature (TT-501)"
+    value_type: float
+    units: "°C"
+    interval: "10s"
+    component: "Process Temperature"
+    collection: "S7comm via Node-RED (RTD, PLC DB)"
+    failure_mode: "Joule-Thomson cooling after letdown, heater failure, hydrate formation"
+    source: "Downstream of regulator, keep >5°C to avoid hydrates"
+    sim:
+      kind: numeric
+      good: [12, 28]
+      underperform: [3, 11]
+      failed: [-8, 2]
+      weights: [good, underperform, failed]
+      jitter: 0.5
+    triggers:
+      - { op: "<=", value: 5, severity: warning, label: "Gas temp low — hydrate risk" }
+      - { op: "<=", value: 0, severity: high,    label: "Gas temp freezing — hydrate/ice formation" }
+
+  - key: "proc.heater.outlet_temp"
+    name: "Indirect Heater Outlet (water bath) Temp (TT-601)"
+    value_type: float
+    units: "°C"
+    interval: "10s"
+    component: "Preheat"
+    collection: "S7comm via Node-RED (RTD, PLC DB)"
+    failure_mode: "Burner flameout, fuel gas loss, water bath level low"
+    source: "Indirect water-bath heater, normal 50-70°C"
+    sim:
+      kind: numeric
+      good: [52, 68]
+      underperform: [40, 51]
+      failed: [25, 39]
+      weights: [good, underperform, failed]
+      jitter: 0.8
+    triggers:
+      - { op: "<=", value: 48, severity: warning, label: "Heater outlet temp low" }
+      - { op: "<=", value: 40, severity: high,    label: "Heater failure — downstream hydrate risk" }
+
+  # ── Gas quality (analyzers / gas chromatograph) ────────────────────────
+  - key: "proc.gas.heating_value"
+    name: "Calorific Value / GHV (GC analyzer)"
+    value_type: float
+    units: "MJ/m^3"
+    interval: "60s"
+    component: "Gas Quality"
+    collection: "S7comm via Node-RED (gas chromatograph -> PLC DB)"
+    failure_mode: "Off-spec gas blend, GC drift/fault, upstream commingling"
+    source: "Natural gas GHV typically 36-42 MJ/m³ (contractual)"
+    sim:
+      kind: numeric
+      good: [37, 41]
+      underperform: [33, 36.9]
+      failed: [29, 32.9]
+      weights: [good, underperform, failed]
+      jitter: 0.3
+    triggers:
+      - { op: "<=", value: 36, severity: warning, label: "Heating value below spec" }
+      - { op: "<=", value: 33, severity: high,    label: "Off-spec gas — custody/billing impact" }
+
+  - key: "proc.gas.specific_gravity"
+    name: "Specific Gravity / Relative Density (GC)"
+    value_type: float
+    units: ""
+    interval: "60s"
+    component: "Gas Quality"
+    collection: "S7comm via Node-RED (gas chromatograph -> PLC DB)"
+    failure_mode: "Heavy-hydrocarbon ingress, composition drift, analyzer fault"
+    source: "Natural gas SG ~0.58-0.64 (air=1)"
+    sim:
+      kind: numeric
+      good: [0.58, 0.64]
+      underperform: [0.65, 0.69]
+      failed: [0.70, 0.78]
+      weights: [good, underperform, failed]
+      jitter: 0.004
+    triggers:
+      - { op: ">=", value: 0.65, severity: warning, label: "SG high — composition drift" }
+      - { op: ">=", value: 0.70, severity: high,    label: "SG out of contractual range" }
+
+  # ── Final control element ──────────────────────────────────────────────
+  - key: "proc.valve.control_position"
+    name: "Pressure Control Valve Position (PCV-201)"
+    value_type: float
+    units: "%"
+    interval: "5s"
+    component: "Control Valve"
+    collection: "S7comm via Node-RED (valve positioner feedback, PLC DB)"
+    failure_mode: "Valve stiction, positioner fault, actuator air loss; saturation = lost regulation"
+    source: "Regulating valve, healthy modulation 20-80% open"
+    sim:
+      kind: numeric
+      good: [25, 75]
+      underperform: [80, 92]
+      failed: [95, 100]
+      weights: [good, underperform, failed]
+      jitter: 1.5
+    triggers:
+      - { op: ">=", value: 90, severity: warning, label: "Control valve near full open — limited margin" }
+      - { op: ">=", value: 98, severity: high,    label: "Control valve saturated — regulation lost" }
+
+  - key: "proc.valve.esd_status"
+    name: "ESD / Shutdown Valve Status (SDV-001)"
+    value_type: unsigned
+    units: ""
+    interval: "10s"
+    component: "Safety Shutdown"
+    collection: "S7comm via Node-RED (limit switches, PLC DB)"
+    failure_mode: "ESD trip (valve slams shut), solenoid/limit-switch fault, partial travel"
+    source: "SIL-rated SDV: 1=Open(normal), 2=Travel/fault, 0=Closed(tripped)"
+    sim:
+      kind: enum
+      states:
+        - { value: 1, weight: good,         label: "Open (normal flow)" }
+        - { value: 2, weight: underperform, label: "Travel / position fault" }
+        - { value: 0, weight: failed,       label: "CLOSED — ESD activated" }
+    triggers:
+      - { op: "=", value: 2, severity: warning, label: "SDV travel/position fault" }
+      - { op: "=", value: 0, severity: high,    label: "ESD valve CLOSED — emergency shutdown" }
+
+  # ── Fire & Gas safety ──────────────────────────────────────────────────
+  - key: "proc.safety.gas_detection_lel"
+    name: "Combustible Gas Detection (% LEL)"
+    value_type: float
+    units: "% LEL"
+    interval: "5s"
+    component: "Fire & Gas"
+    collection: "S7comm via Node-RED (IR point detectors -> F&G PLC)"
+    failure_mode: "Methane leak from flange/seal, detector drift, gas cloud accumulation"
+    source: "IEC 60079 F&G: alarm at 20% LEL, ESD at 40-60% LEL"
+    sim:
+      kind: numeric
+      good: [0, 4]
+      underperform: [5, 19]
+      failed: [20, 60]
+      weights: [good, underperform, failed]
+      jitter: 0.5
+    triggers:
+      - { op: ">=", value: 5,  severity: warning, label: "Combustible gas detected — LEL alarm" }
+      - { op: ">=", value: 20, severity: high,    label: "LEL high-high — auto ESD / evacuate" }
+
+  - key: "proc.safety.h2s"
+    name: "H2S Concentration (toxic gas)"
+    value_type: float
+    units: "ppm"
+    interval: "5s"
+    component: "Fire & Gas"
+    collection: "S7comm via Node-RED (electrochemical detectors -> F&G PLC)"
+    failure_mode: "Sour gas ingress, H2S breakthrough, detector end-of-life"
+    source: "TLV-TWA 10 ppm, TLV-STEL 15 ppm (toxic)"
+    sim:
+      kind: numeric
+      good: [0, 4]
+      underperform: [5, 10]
+      failed: [11, 30]
+      weights: [good, underperform, failed]
+      jitter: 0.3
+    triggers:
+      - { op: ">=", value: 10, severity: warning, label: "H2S above TLV-TWA" }
+      - { op: ">=", value: 15, severity: high,    label: "H2S high — toxic, evacuate" }
+
+  - key: "proc.fire_gas.status"
+    name: "Fire & Gas System Status"
+    value_type: unsigned
+    units: ""
+    interval: "10s"
+    component: "Fire & Gas"
+    collection: "S7comm via Node-RED (F&G logic solver status word)"
+    failure_mode: "Confirmed fire/gas event, detector fault, channel inhibit/bypass"
+    source: "F&G status: 0=Normal/Healthy, 1=Fault/Inhibit, 2=Active alarm"
+    sim:
+      kind: enum
+      states:
+        - { value: 0, weight: good,         label: "Normal / Healthy" }
+        - { value: 1, weight: underperform, label: "Fault / Channel inhibit" }
+        - { value: 2, weight: failed,       label: "ACTIVE — confirmed fire/gas, ESD" }
+    triggers:
+      - { op: "=", value: 1, severity: warning, label: "F&G fault / channel inhibited" }
+      - { op: "=", value: 2, severity: high,    label: "F&G ACTIVE — confirmed fire/gas event" }
+
+  - key: "proc.odorant.injection_rate"
+    name: "Odorant (THT) Injection Rate"
+    value_type: float
+    units: "mg/m^3"
+    interval: "30s"
+    component: "Odorization"
+    collection: "S7comm via Node-RED (odorizer pump feedback, PLC DB)"
+    failure_mode: "Odorant tank low, injection pump fault — under-odorized gas is undetectable on leak"
+    source: "THT odorization typically 12-18 mg/m³ (regulatory minimum)"
+    sim:
+      kind: numeric
+      good: [13, 18]
+      underperform: [7, 12.9]
+      failed: [0, 6]
+      weights: [good, underperform, failed]
+      jitter: 0.4
+    triggers:
+      - { op: "<=", value: 12, severity: warning, label: "Odorant injection below target" }
+      - { op: "<=", value: 6,  severity: high,    label: "Under-odorization — safety non-compliance" }
+
+  # ── Compressor train health (rotating equipment) ───────────────────────
+  - key: "proc.comp.suction_pressure"
+    name: "Compressor Suction Pressure (PT-701)"
+    value_type: float
+    units: "barg"
+    interval: "5s"
+    component: "Compressor"
+    collection: "S7comm via Node-RED (PLC DB, AI 4-20mA)"
+    failure_mode: "Suction starvation, upstream throttling, recycle valve fault"
+    source: "Centrifugal compressor suction, normal 18-24 barg"
+    sim:
+      kind: numeric
+      good: [18, 24]
+      underperform: [14, 17.9]
+      failed: [8, 13.9]
+      weights: [good, underperform, failed]
+      jitter: 0.25
+    triggers:
+      - { op: "<=", value: 16, severity: warning, label: "Suction pressure low" }
+      - { op: "<=", value: 12, severity: high,    label: "Suction LOW-LOW — surge/trip risk" }
+
+  - key: "proc.comp.discharge_pressure"
+    name: "Compressor Discharge Pressure (PT-702)"
+    value_type: float
+    units: "barg"
+    interval: "5s"
+    component: "Compressor"
+    collection: "S7comm via Node-RED (PLC DB, AI 4-20mA)"
+    failure_mode: "Downstream blockage, check-valve fault, over-compression"
+    source: "Discharge header, normal 40-55 barg, relief ~65 barg"
+    sim:
+      kind: numeric
+      good: [40, 55]
+      underperform: [56, 62]
+      failed: [63, 72]
+      weights: [good, underperform, failed]
+      jitter: 0.3
+    triggers:
+      - { op: ">=", value: 58, severity: warning, label: "Discharge pressure high" }
+      - { op: ">=", value: 65, severity: high,    label: "Discharge HIGH-HIGH — relief/trip" }
+
+  - key: "proc.comp.vibration"
+    name: "Compressor Vibration (VT-703, ISO 10816)"
+    value_type: float
+    units: "mm/s"
+    interval: "5s"
+    component: "Compressor"
+    collection: "S7comm via Node-RED (vibration transmitter, PLC DB)"
+    failure_mode: "Bearing wear, rotor imbalance, misalignment, surge"
+    source: "ISO 10816: Zone A/B <2.8, C 2.8-7.1, D >7.1 (trip)"
+    sim:
+      kind: numeric
+      good: [0.5, 2.8]
+      underperform: [2.9, 7.1]
+      failed: [7.2, 15]
+      weights: [good, underperform, failed]
+      jitter: 0.2
+    triggers:
+      - { op: ">=", value: 2.8, severity: warning, label: "Vibration elevated (Zone C)" }
+      - { op: ">=", value: 7.1, severity: high,    label: "Vibration trip threshold (Zone D)" }
+
+  - key: "proc.comp.bearing_temp"
+    name: "Compressor Bearing Temperature (TT-704)"
+    value_type: float
+    units: "°C"
+    interval: "5s"
+    component: "Compressor"
+    collection: "S7comm via Node-RED (RTD, PLC DB)"
+    failure_mode: "Lube oil starvation, bearing degradation, cooler fouling"
+    source: "Journal bearing, normal 45-75°C, trip ~100°C"
+    sim:
+      kind: numeric
+      good: [45, 75]
+      underperform: [76, 95]
+      failed: [96, 120]
+      weights: [good, underperform, failed]
+      jitter: 0.8
+    triggers:
+      - { op: ">=", value: 80,  severity: warning, label: "Bearing temperature high" }
+      - { op: ">=", value: 100, severity: high,    label: "Bearing temperature TRIP" }
+
+  - key: "proc.comp.lube_oil_pressure"
+    name: "Compressor Lube Oil Pressure (PT-705)"
+    value_type: float
+    units: "barg"
+    interval: "5s"
+    component: "Compressor"
+    collection: "S7comm via Node-RED (PLC DB, AI 4-20mA)"
+    failure_mode: "Oil pump fault, filter blockage, oil leak — leads to bearing failure"
+    source: "Lube oil header, normal 2.5-4 barg, trip <1.4 barg"
+    sim:
+      kind: numeric
+      good: [2.5, 4.0]
+      underperform: [1.5, 2.4]
+      failed: [0, 1.4]
+      weights: [good, underperform, failed]
+      jitter: 0.1
+    triggers:
+      - { op: "<=", value: 2.0, severity: warning, label: "Lube oil pressure low" }
+      - { op: "<=", value: 1.2, severity: high,    label: "Lube oil LOW-LOW — compressor trip" }
+
+  - key: "proc.comp.speed"
+    name: "Compressor Speed (ST-706)"
+    value_type: unsigned
+    units: "rpm"
+    interval: "5s"
+    component: "Compressor"
+    collection: "S7comm via Node-RED (speed pickup, PLC DB)"
+    failure_mode: "Driver trip, governor fault, overspeed, train stop"
+    source: "Variable-speed centrifugal, normal 4800-6300 rpm"
+    sim:
+      kind: numeric
+      good: [4800, 6300]
+      underperform: [3500, 4799]
+      failed: [0, 800]
+      weights: [good, underperform, failed]
+      jitter: 40
+    triggers:
+      - { op: "<=", value: 4000, severity: warning, label: "Compressor speed low" }
+      - { op: "<=", value: 1000, severity: high,    label: "Compressor stopped / tripped" }

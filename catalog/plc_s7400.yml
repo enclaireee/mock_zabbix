@@ -1,0 +1,135 @@
+# =============================================================================
+# Asset Class: PLC Siemens S7-400 (S7-400H fault-tolerant)
+# Collection reality: CPU internals are NOT exposed via SNMP (CP443-1 only sees
+# the comms module). CPU/diag data arrives via S7comm -> Node-RED -> Zabbix
+# Trapper. Only CP reachability/uptime is native SNMP/ICMP.
+# See catalog/README.md for the schema.
+# =============================================================================
+asset_class: "PLC Siemens S7-400"
+host_group: "OT/PLC"
+template_name: "Template OT PLC S7-400"
+template_group: "Templates/OT"
+
+# One PLC per site (see catalog/sites.yml). Inventory/geomap filled from the site.
+host_template:
+  tech: "PLC-S7400-{code}"
+  name: "{name} — PLC S7-400H"
+  macros: { "{$SITE}": "{code}", "{$RACK}": "0", "{$SLOT}": "2" }
+
+parameters:
+  - key: "plc.cpu.operating_mode"
+    name: "CPU Operating Mode"
+    value_type: unsigned
+    units: ""
+    interval: "15s"
+    component: "C. Modules (CPU)"
+    collection: "S7comm via Node-RED (SZL 0x0424, byte 11)"
+    failure_mode: "Hardware defect, watchdog timeout, forced restart after power failure"
+    source: "Siemens OPC SZL Diagnostics, 2024"
+    sim:
+      kind: enum
+      states:
+        - { value: 8,  weight: good,         label: "RUN (0x08)" }
+        - { value: 6,  weight: underperform, label: "START-UP (0x06)" }
+        - { value: 13, weight: failed,       label: "DEFECT (0x0D)" }
+    triggers:
+      - { op: "=",  value: 6,  severity: warning, label: "CPU not in RUN (start-up/restart)" }
+      - { op: ">=", value: 13, severity: high,    label: "CPU STOP/DEFECT — plant logic dead" }
+
+  - key: "plc.diag.buffer_last"
+    name: "Diagnostic Buffer — Recent Event"
+    value_type: text
+    units: ""
+    interval: "30s"
+    component: "A. Diagnostic Buffer"
+    collection: "S7comm via Node-RED (SZL 0x00A0, custom parser)"
+    failure_mode: "Module failure, program execution error, CMOS battery low"
+    source: "SIMATIC Diagnostic Function Manual, 2020"
+    sim:
+      kind: enum
+      states:
+        - { value: "NTP time sync OK",              weight: good,         label: informational }
+        - { value: "Module failure (partial)",      weight: underperform, label: degradation }
+        - { value: "STOP caused by I/O error",      weight: failed,       label: fatal }
+    # text item is informational; alerting handled by the accumulation counter below.
+
+  - key: "plc.diag.event_rate"
+    name: "Diagnostic Event Accumulation (per interval)"
+    value_type: unsigned
+    units: "events"
+    interval: "60s"
+    component: "A. Diagnostic Buffer"
+    collection: "S7comm via Node-RED (SZL 0x00A0 size delta)"
+    failure_mode: "Intermittent instrument cabling fault, transient power dip (flapping)"
+    source: "SIMATIC S7-300/400 CPU Manual, 2020"
+    sim:
+      kind: numeric
+      good: [0, 0]
+      underperform: [1, 5]
+      failed: [80, 400]
+      weights: [good, underperform, failed]
+      jitter: 0
+    triggers:
+      - { op: ">=", value: 1,  severity: warning, label: "Diagnostic events accumulating (flapping)" }
+      - { op: ">=", value: 50, severity: high,    label: "Diagnostic event storm — possible short circuit" }
+
+  - key: "plc.io.channels_faulted"
+    name: "I/O Channel Faults (count)"
+    value_type: unsigned
+    units: "channels"
+    interval: "15s"
+    component: "B. Info I/O"
+    collection: "S7comm via Node-RED (OB82 diagnostic interrupt -> DB bitfield)"
+    failure_mode: "4-20mA sensor wire break, moisture short circuit on field loop"
+    source: "SIMATIC S7 CPU Functional Description, 2020"
+    # ponytail: doc models this as an array-of-boolean bitfield; we monitor the
+    # fault COUNT (the actionable scalar). Per-channel map = expand to LLD later.
+    sim:
+      kind: numeric
+      good: [0, 0]
+      underperform: [1, 2]
+      failed: [8, 32]
+      weights: [good, underperform, failed]
+      jitter: 0
+    triggers:
+      - { op: ">=", value: 1, severity: warning, label: "I/O channel fault — sensor wire break" }
+      - { op: ">=", value: 8, severity: high,    label: "Mass I/O loss on control subsystem" }
+
+  - key: "plc.rack.module_status"
+    name: "Rack & Module Status"
+    value_type: unsigned
+    units: ""
+    interval: "30s"
+    component: "C. Modules"
+    collection: "S7comm via Node-RED (SZL 0x00B4 / 0x0232, snap7)"
+    failure_mode: "I/O module burnout, backplane PSU failure, hot-swap error, IM link loss"
+    source: "Siemens CPU Specs & PLC4X S7 Protocol, 2011/2023"
+    sim:
+      kind: enum
+      states:
+        - { value: 0, weight: good,         label: "All modules OK" }
+        - { value: 1, weight: underperform, label: "Redundant partner / module faulty (still running)" }
+        - { value: 2, weight: failed,       label: "Expansion rack IM link lost" }
+    triggers:
+      - { op: "=",  value: 1, severity: average, label: "Module/redundant-partner faulty" }
+      - { op: ">=", value: 2, severity: high,    label: "Expansion rack communication lost" }
+
+  - key: "plc.cp.icmp_latency"
+    name: "CP443-1 Reachability (ICMP latency)"
+    value_type: float
+    units: "ms"
+    interval: "30s"
+    component: "C. Modules (CP)"
+    collection: "native (ICMP ping + sysUpTime SNMP MIB-II)"
+    failure_mode: "External switch power loss, CP443-1 frozen OS (needs physical swap)"
+    source: "SIMATIC NET SNMP Diagnostics, 2017"
+    sim:
+      kind: numeric
+      good: [1.0, 5.0]
+      underperform: [100.0, 400.0]
+      failed: [2000.0, 2000.0]   # sentinel: treated as 100% loss / unreachable
+      weights: [good, underperform, failed]
+      jitter: 0.5
+    triggers:
+      - { op: ">=", value: 100,  severity: warning, label: "CP latency high / packet loss (switch congestion)" }
+      - { op: ">=", value: 1000, severity: high,    label: "CP unreachable — frozen module / 100% loss" }

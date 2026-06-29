@@ -1,0 +1,215 @@
+# =============================================================================
+# Asset Class: Workstation / HMI (Wonderware on Windows)
+# Collection reality: OS + SMART are native (Zabbix Agent 2). Motherboard sensors
+# (fan RPM, PSU rails, CPU temp) are NOT native on Windows — need LibreHardwareMonitor
+# injected into WMI (Root\LibreHardwareMonitor) or iDRAC/iLO on server-grade HMIs.
+# =============================================================================
+asset_class: "Workstation / HMI"
+host_group: "IT/HMI"
+template_name: "Template OT Workstation HMI"
+template_group: "Templates/OT"
+
+# One HMI workstation per site (see catalog/sites.yml). {$GRADE} comes from the site.
+host_template:
+  tech: "HMI-{code}-WW01"
+  name: "{name} — Wonderware HMI Operator Station 01"
+  macros: { "{$SITE}": "{code}", "{$GRADE}": "{grade}" }
+
+parameters:
+  - key: "hmi.cpu.util"
+    name: "CPU Utilization"
+    value_type: float
+    units: "%"
+    interval: "1m"
+    component: "A. Performance (CPU)"
+    collection: "native (Zabbix Agent: system.cpu.util)"
+    failure_mode: "Memory leak in historian, registry corruption loop, cryptomalware"
+    source: "Zabbix Windows Items, 2024"
+    sim:
+      kind: numeric
+      good: [5, 50]
+      underperform: [70, 90]
+      failed: [99, 100]
+      weights: [good, underperform, failed]
+      jitter: 3
+    triggers:
+      - { op: ">=", value: 70, severity: warning, label: "CPU sustained high — operator UI lag" }
+      - { op: ">=", value: 98, severity: high,    label: "CPU pegged 100% — application deadlock" }
+
+  - key: "hmi.mem.available"
+    name: "Memory Available"
+    value_type: float
+    units: "%"
+    interval: "1m"
+    component: "A. Performance (RAM)"
+    collection: "native (Zabbix Agent: vm.vmemory.size[pavailable])"
+    failure_mode: "HMI memory allocation leak, DB fragmentation, paging storm"
+    source: "Zabbix Windows Items, 2024"
+    sim:
+      kind: numeric
+      good: [20, 70]
+      underperform: [5, 20]
+      failed: [1, 5]
+      weights: [good, underperform, failed]
+      jitter: 2
+    triggers:
+      - { op: "<=", value: 20, severity: warning, label: "Memory low — heavy paging" }
+      - { op: "<=", value: 5,  severity: high,    label: "Out-of-memory — process kill imminent" }
+
+  - key: "hmi.disk.free"
+    name: "Free Logical Disk Space (C:)"
+    value_type: float
+    units: "%"
+    interval: "5m"
+    component: "A. Performance (Disk)"
+    collection: "native (Zabbix Agent: vfs.fs.size[C:,pfree])"
+    failure_mode: "Historian log rotation failure, partition full, stuck update"
+    source: "Zabbix vfs.filesystem, 2020"
+    sim:
+      kind: numeric
+      good: [20, 80]
+      underperform: [5, 20]
+      failed: [0, 5]
+      weights: [good, underperform, failed]
+      jitter: 1
+    triggers:
+      - { op: "<=", value: 20, severity: warning, label: "Disk filling — temp cleanup started" }
+      - { op: "<=", value: 5,  severity: high,    label: "Disk full — cannot write logs/pagefile" }
+
+  - key: "hmi.smart.realloc_sectors"
+    name: "SMART Reallocated Sectors"
+    value_type: unsigned
+    units: ""
+    interval: "1h"
+    component: "A. Performance (Disk)"
+    collection: "native (Zabbix Agent 2 SMART plugin: smart.disk.get)"
+    failure_mode: "HDD bearing wear, SSD write-cycle endurance (TBW) exceeded"
+    source: "Zabbix SMART Plugin, 2022"
+    sim:
+      kind: numeric
+      good: [0, 0]
+      underperform: [1, 40]
+      failed: [200, 800]
+      weights: [good, underperform, failed]
+      jitter: 0
+    triggers:
+      - { op: ">=", value: 1,   severity: warning, label: "Sectors reallocating — early media degradation" }
+      - { op: ">=", value: 200, severity: high,    label: "Reallocation past firmware threshold" }
+
+  - key: "hmi.smart.health_passed"
+    name: "SMART Overall Device Health"
+    value_type: unsigned
+    units: ""
+    interval: "1h"
+    component: "A. Performance (Disk)"
+    collection: "native (Zabbix Agent 2 SMART: self_test_passed)"
+    failure_mode: "HDD controller / PCB burnout"
+    source: "Zabbix SMART Plugin, 2022"
+    sim:
+      kind: enum
+      states:
+        - { value: 1, weight: good,   label: "self_test_passed: TRUE" }
+        - { value: 0, weight: failed, label: "self_test_passed: FALSE — fatal media verdict" }
+    triggers:
+      - { op: "=", value: 0, severity: high, label: "SMART self-test FAILED" }
+
+  - key: "hmi.nic.errors"
+    name: "NIC Port Error Rate"
+    value_type: unsigned
+    units: "errors"
+    interval: "1m"
+    component: "B. Network / LAN"
+    collection: "native (Zabbix Agent: net.if.in[...,errors])"
+    failure_mode: "Crosstalk on damaged cable, corroded connector, duplex mismatch"
+    source: "Zabbix Network Interfaces Windows, 2024"
+    sim:
+      kind: numeric
+      good: [0, 0]
+      underperform: [1, 30]
+      failed: [200, 1500]
+      weights: [good, underperform, failed]
+      jitter: 0
+    triggers:
+      - { op: ">=", value: 1,   severity: warning, label: "NIC errors creeping — TCP retransmits" }
+      - { op: ">=", value: 200, severity: high,    label: "NIC errors overflow — link timeout to PLC" }
+
+  - key: "hmi.nic.oper_state"
+    name: "NIC Operational State"
+    value_type: unsigned
+    units: ""
+    interval: "1m"
+    component: "B. Network / LAN"
+    collection: "native (Zabbix Agent: net.if.discovery + net.if.list)"
+    failure_mode: "Copper link break in patch panel, rodent damage, NIC hang"
+    source: "Zabbix Network Interfaces Windows, 2024"
+    sim:
+      kind: enum
+      states:
+        - { value: 1, weight: good,         label: "Up — 1 Gbps" }
+        - { value: 2, weight: underperform, label: "Link flapping" }
+        - { value: 0, weight: failed,       label: "Down — HMI cut off from process" }
+    triggers:
+      - { op: "=", value: 2, severity: warning, label: "NIC link flapping" }
+      - { op: "=", value: 0, severity: high,    label: "NIC Down — HMI isolated" }
+
+  - key: "hmi.fan.rpm"
+    name: "System/Chassis Fan Speed"
+    value_type: float
+    units: "rpm"
+    interval: "1m"
+    component: "C. Fan"
+    collection: "custom (LibreHardwareMonitor WMI / IPMI OEM)"
+    failure_mode: "Dust clogging airflow, worn fan bearing, DC rotor supply cut"
+    source: "LHM WMI & HP iLO SNMP, 2023"
+    sim:
+      kind: numeric
+      good: [1000, 3000]
+      underperform: [300, 800]
+      failed: [0, 0]
+      weights: [good, underperform, failed]
+      jitter: 50
+    triggers:
+      - { op: "<=", value: 800, severity: warning, label: "Fan RPM dropping — bearing wear / clog" }
+      - { op: "<=", value: 1,   severity: high,    label: "Fan stalled (0 RPM) under load" }
+
+  - key: "hmi.psu.rail_12v"
+    name: "PSU +12V Rail Voltage"
+    value_type: float
+    units: "V"
+    interval: "5m"
+    component: "D. Power Supply"
+    collection: "custom (LibreHardwareMonitor WMI / IPMI OEM)"
+    failure_mode: "Capacitor ageing (>5y), unstable facility mains, regulator overload"
+    source: "LHM WMI & Dell OMSA, 2021"
+    # ATX spec: ±5% => 11.40–12.60 V good. Two-sided trigger (brownout + overvoltage).
+    sim:
+      kind: numeric
+      good: [11.7, 12.3]
+      underperform: [11.40, 11.55]
+      failed: [10.8, 11.2]
+      weights: [good, underperform, failed]
+      jitter: 0.05
+    triggers:
+      - { op: "<=", value: 11.45, severity: warning, label: "+12V near lower ATX margin" }
+      - { op: "<=", value: 11.40, severity: high,    label: "+12V brownout — below ATX ±5%" }
+      - { op: ">=", value: 12.60, severity: high,    label: "+12V overvoltage — above ATX ±5%" }
+
+  - key: "hmi.cpu.temp"
+    name: "CPU Core Temperature"
+    value_type: float
+    units: "°C"
+    interval: "1m"
+    component: "E. Temperature"
+    collection: "custom (LibreHardwareMonitor WMI / IPMI OEM)"
+    failure_mode: "Dried thermal paste, heatsink fouling, control-room AC failure"
+    source: "Zabbix WMI Sensors + LibreHardwareMonitor, 2024"
+    sim:
+      kind: numeric
+      good: [40, 60]
+      underperform: [66, 84]
+      failed: [86, 99]
+      weights: [good, underperform, failed]
+      jitter: 1.5
+    triggers:
+      - { op: ">=", value: 65, severity: warning, label: "Thermal degradation (cooling efficiency loss)" }
+      - { op: ">=", value: 85, severity: high,    label: "Thermal throttling — auto-shutdown risk" }

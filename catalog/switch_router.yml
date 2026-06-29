@@ -1,0 +1,113 @@
+# =============================================================================
+# Asset Class: Switch / Router (Industrial network — Cisco IE, SCALANCE)
+# Collection reality: fully native SNMP (IF-MIB + CISCO-ENVMON-MIB / ENTITY-SENSOR-MIB).
+# Here the values are pushed via trapper for the lab; in production these are
+# SNMP-polled by a native Zabbix template.
+# =============================================================================
+asset_class: "Switch / Router"
+host_group: "Network/Industrial"
+template_name: "Template OT Switch Router"
+template_group: "Templates/OT"
+
+# One industrial switch per site (see catalog/sites.yml).
+host_template:
+  tech: "SW-{code}-IE01"
+  name: "{name} — Industrial Switch (ring uplink)"
+  macros: { "{$SITE}": "{code}", "{$IFNAME}": "Gi1/0/1" }
+
+parameters:
+  - key: "net.if.oper_status"
+    name: "Interface Operational Status"
+    value_type: unsigned
+    units: ""
+    interval: "1m"
+    component: "A. Port status"
+    collection: "native SNMP (IF-MIB ifOperStatus 1.3.6.1.2.1.2.2.1.8)"
+    failure_mode: "Fiber cut, SFP laser death"
+    source: "RFC 2863 IF-MIB & SIMATIC NET, 2003/2024"
+    # Binary link state: Good/Failed only. Flapping is a time-domain pattern, not
+    # a distinct value — the Underperform network signal lives in error_rate/discards.
+    sim:
+      kind: enum
+      states:
+        - { value: 1, weight: good,   label: "up(1)" }
+        - { value: 2, weight: failed, label: "down(2) — field station blind" }
+    triggers:
+      - { op: "=", value: 2, severity: high, label: "Uplink down — field RTU/PLC unreachable" }
+
+  - key: "net.if.admin_status"
+    name: "Interface Administrative Status"
+    value_type: unsigned
+    units: ""
+    interval: "5m"
+    component: "A. Port status"
+    collection: "native SNMP (IF-MIB ifAdminStatus 1.3.6.1.2.1.2.2.1.7)"
+    failure_mode: "STP loop protection, Port Security MAC block, IT misconfig"
+    source: "RFC 2863 IF-MIB, 2003"
+    # Binary admin state: Good/Failed only (see oper_status note).
+    sim:
+      kind: enum
+      states:
+        - { value: 1, weight: good,   label: "up(1)" }
+        - { value: 2, weight: failed, label: "down(2) — STP/Port-Security shutdown" }
+    triggers:
+      - { op: "=", value: 2, severity: average, label: "Port admin-down (protection / misconfig)" }
+
+  - key: "net.if.error_rate"
+    name: "Inbound/Outbound Error Rate"
+    value_type: unsigned
+    units: "errors"
+    interval: "1m"
+    component: "A. Port status"
+    collection: "native SNMP (IF-MIB ifInErrors/ifOutErrors, delta)"
+    failure_mode: "EMI from nearby turbine, fiber micro-bending past radius, CRC/FCS failure"
+    source: "RFC 2863 IF-MIB, Zabbix Counters, 2024"
+    sim:
+      kind: numeric
+      good: [0, 0]
+      underperform: [1, 40]
+      failed: [300, 2000]
+      weights: [good, underperform, failed]
+      jitter: 0
+    triggers:
+      - { op: ">=", value: 1,   severity: warning, label: "CRC/FCS errors climbing — TCP retransmits" }
+      - { op: ">=", value: 300, severity: high,    label: "Error rate >5% — link integrity lost" }
+
+  - key: "net.if.discards"
+    name: "Inbound/Outbound Frame Discards"
+    value_type: unsigned
+    units: "frames"
+    interval: "1m"
+    component: "A. Port status"
+    collection: "native SNMP (IF-MIB ifInDiscards/ifOutDiscards, delta)"
+    failure_mode: "Buffer/queue congestion, 1Gbps->10Mbps asymmetry, broadcast storm"
+    source: "RFC 2863 IF-MIB, 2024"
+    sim:
+      kind: numeric
+      good: [0, 0]
+      underperform: [1, 50]
+      failed: [500, 5000]
+      weights: [good, underperform, failed]
+      jitter: 0
+    triggers:
+      - { op: ">=", value: 1,   severity: warning, label: "Queue discards rising — backplane congestion" }
+      - { op: ">=", value: 500, severity: high,    label: "Discard spike — broadcast storm" }
+
+  - key: "net.env.fan_state"
+    name: "Equipment Fan State"
+    value_type: unsigned
+    units: ""
+    interval: "5m"
+    component: "B. Fan"
+    collection: "native SNMP (CISCO-ENVMON-MIB ciscoEnvMonFanState / ENTITY-SENSOR-MIB)"
+    failure_mode: "Fan bearing degraded, thermal control supply cut"
+    source: "CISCO-ENVMON-MIB & ENTITY-SENSOR-MIB, 2023"
+    sim:
+      kind: enum
+      states:
+        - { value: 1, weight: good,         label: "normal(1)" }
+        - { value: 2, weight: underperform, label: "warning(2) — redundant fan weak" }
+        - { value: 3, weight: failed,       label: "critical(3)/shutdown(4) — FRU replace" }
+    triggers:
+      - { op: "=",  value: 2, severity: warning, label: "Switch fan warning — pre-failure" }
+      - { op: ">=", value: 3, severity: high,    label: "Switch fan critical — thermal shutdown risk" }
