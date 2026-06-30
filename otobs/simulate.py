@@ -21,7 +21,7 @@ def sample(sim: Sim, state: State, value_type: str = "float"):
     if sim.kind == "enum":
         return state.value
     v = random.uniform(state.lo, state.hi) + random.gauss(0, state.jitter)
-    v = max(state.lo - state.jitter, min(state.hi + state.jitter, v))  # keep near band
+    v = max(state.lo - state.jitter, min(state.hi + state.jitter, v))
     return int(round(v)) if value_type == "unsigned" else round(v, 3)
 
 
@@ -83,7 +83,7 @@ def run(assets: list[AssetClass]) -> None:
                 ts = time.strftime("%H:%M:%S")
                 tail = ("  | " + ", ".join(notes[:4]) + ("…" if len(notes) > 4 else "")) if notes else ""
                 print(f"{ts}  sent={len(batch)} processed={ok} failed={fail}{tail}")
-            except Exception as e:  # noqa: BLE001 — keep the lab running through blips
+            except Exception as e:  # noqa: BLE001
                 print(f"send error: {e}")
         time.sleep(0.5)
 

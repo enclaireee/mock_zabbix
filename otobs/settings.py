@@ -16,7 +16,7 @@ def _load_env() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        v = v.split(" #", 1)[0].strip()   # drop inline comments
+        v = v.split(" #", 1)[0].strip()
         os.environ.setdefault(k.strip(), v)
 
 
@@ -30,15 +30,12 @@ def _f(key: str, default: float) -> float:
         return default
 
 
-# Zabbix API (provisioning)
 API_URL = os.environ.get("ZBX_API_URL", "http://127.0.0.1:8080")
 API_USER = os.environ.get("ZBX_API_USER", "Admin")
 API_PASSWORD = os.environ.get("ZBX_API_PASSWORD", "zabbix")
 
-# Trapper sender (simulation)
 SENDER_HOST = os.environ.get("ZBX_SENDER_HOST", "127.0.0.1")
 SENDER_PORT = int(os.environ.get("ZBX_SENDER_PORT", "10051"))
 
-# Simulation tuning — the calibration knobs for the mock plant
-STICKINESS = _f("SIM_STICKINESS", 0.92)
-TIME_SCALE = _f("SIM_TIME_SCALE", 10.0)
+STICKINESS = _f("SIM_STICKINESS", 0.30)
+TIME_SCALE = _f("SIM_TIME_SCALE", 1000.0)

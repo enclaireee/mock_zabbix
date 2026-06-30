@@ -28,7 +28,7 @@ def cmd_check() -> None:
             idx = None
             seen_bands = set()
             for _ in range(500):
-                idx = next_state(p.sim, idx, stickiness=0.5)
+                idx = next_state(p.sim, idx, stickiness=0.30)
                 st = p.sim.states[idx]
                 seen_bands.add(st.band)
                 v = sample(p.sim, st, p.value_type)

@@ -19,10 +19,9 @@ class Provisioner:
     def close(self) -> None:
         try:
             self.api.logout()
-        except Exception:  # noqa: BLE001 — logout is best-effort
+        except Exception:  # noqa: BLE001
             pass
 
-    # --- get-or-create helpers (called once each per asset) ----------------
     def _templategroup(self, name: str) -> str:
         got = self.api.templategroup.get(filter={"name": [name]}, output=["groupid"])
         return got[0]["groupid"] if got else \
@@ -38,13 +37,12 @@ class Provisioner:
         return got[0]["templateid"] if got else \
             self.api.template.create(host=name, groups=[{"groupid": tg_id}])["templateids"][0]
 
-    # --- create-if-absent against a pre-fetched existence set --------------
     def _item(self, template_id: str, p: Parameter, existing: set[str]) -> None:
         if p.key in existing:
             return
         self.api.item.create(
             hostid=template_id, name=p.name, key_=p.key,
-            type=2,                       # 2 = Zabbix trapper
+            type=2,
             value_type=p.value_type_code,
             units=p.units,
             description=p.description(),
@@ -66,7 +64,6 @@ class Provisioner:
     def _host(self, h, hg_id: str, template_id: str, existing: dict[str, str]) -> None:
         inv = h.inventory
         if h.host in existing:
-            # Re-sync mutable data (visible name + inventory/location) on re-run.
             self.api.host.update(hostid=existing[h.host], name=h.name,
                                  inventory_mode=0 if inv else -1, inventory=inv)
             print(f"    ~ host {h.host} (data synced)")
@@ -101,7 +98,6 @@ class Provisioner:
             for h in stale:
                 print(f"  - pruned stale host {h['host']}")
 
-    # --- top level ----------------------------------------------------------
     def apply(self, asset: AssetClass) -> None:
         print(f"\n[{asset.asset_class}]")
         tg_id = self._templategroup(asset.template_group)
@@ -109,7 +105,6 @@ class Provisioner:
         template_id = self._template(asset.template_name, tg_id)
         print(f"  template '{asset.template_name}' ({len(asset.parameters)} params)")
 
-        # Fetch what already exists once, scoped to this template (avoid N+1 calls).
         items = {i["key_"] for i in self.api.item.get(templateids=template_id, output=["key_"])}
         triggers = {t["description"] for t in self.api.trigger.get(templateids=template_id, output=["description"])}
         host_names = [h.host for h in asset.hosts]

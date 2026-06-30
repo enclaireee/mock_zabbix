@@ -3,7 +3,5 @@ __pycache__/
 *.pyc
 .env
 zbx_db_data/
-docs
-README.md
 .env.example
 

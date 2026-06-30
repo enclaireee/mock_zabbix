@@ -1,5 +1,3 @@
-# Real Zabbix stack, local. Official images — we don't reinvent Zabbix.
-# All tunables come from .env (compose reads it automatically).
 services:
   zabbix-db:
     image: postgres:16-alpine

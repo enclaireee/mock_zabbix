@@ -6,16 +6,11 @@ import yaml
 
 from .settings import CATALOG_DIR
 
-# Default steady-state probabilities for the Good/Underperform/Failed bands.
-# A weight given as one of these tokens maps to the number here; a numeric weight
-# is used as-is. Weights are normalized per parameter.
 DEFAULT_WEIGHTS = {"good": 0.90, "underperform": 0.08, "failed": 0.02}
 
 _INTERVAL_UNITS = {"s": 1, "m": 60, "h": 3600}
 
-# Zabbix item value_type codes (API)
 VALUE_TYPE_CODE = {"float": 0, "char": 1, "log": 2, "unsigned": 3, "text": 4}
-# Zabbix trigger priority codes
 SEVERITY_CODE = {
     "not_classified": 0, "info": 1, "warning": 2,
     "average": 3, "high": 4, "disaster": 5,
@@ -43,9 +38,9 @@ def _weight(w) -> float:
 class State:
     """One discrete outcome the simulator can be in (enum value or numeric band)."""
     weight: float
-    band: str               # good | underperform | failed | custom (for display)
-    value: object = None    # enum: fixed value (int/float/str)
-    lo: float | None = None  # numeric band bounds
+    band: str
+    value: object = None
+    lo: float | None = None
     hi: float | None = None
     jitter: float = 0.0
 
@@ -67,7 +62,7 @@ class Trigger:
 
 @dataclass
 class Sim:
-    kind: str               # numeric | enum
+    kind: str
     states: list[State]
 
     def normalized_weights(self) -> list[float]:
@@ -111,7 +106,7 @@ class Host:
     host: str
     name: str
     macros: dict = field(default_factory=dict)
-    inventory: dict = field(default_factory=dict)  # location, location_lat/lon → geomap
+    inventory: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -162,7 +157,7 @@ def _build_param(raw: dict, where: str) -> Parameter:
             raise ValueError(f"{where}: parameter missing {r!r}")
     if raw["value_type"] not in VALUE_TYPE_CODE:
         raise ValueError(f"{where}: bad value_type {raw['value_type']!r}")
-    parse_interval(raw["interval"])  # validate now
+    parse_interval(raw["interval"])
     triggers = [Trigger(**t) for t in raw.get("triggers", [])]
     return Parameter(
         key=raw["key"], name=raw["name"], value_type=raw["value_type"],

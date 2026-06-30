@@ -9,7 +9,6 @@
 # (grade = HMI hardware tier, p_out_sp = regulated outlet pressure setpoint barg).
 # =============================================================================
 sites:
-  # ponytail: TBB name/coords are a best-guess ("Tanjung …", central Sumatra) — confirm & tune per site.
   - { code: GRS, name: "Grissik",      location: "Grissik Gas Plant, Sungai Lilin, Musi Banyuasin, Sumatra Selatan", lat: "-2.0500", lon: "103.4300", city: "Musi Banyuasin", grade: enterprise, p_out_sp: "16" }
-  - { code: TBB, name: "Tanjung Batu", location: "Stasiun Tanjung Batu, Sumatra Tengah (Grissik–Duri line)",          lat: "0.5000",  lon: "101.8000", city: "Riau",           grade: enterprise, p_out_sp: "14" }
+  - { code: TBB, name: "Terbanggi Besar", location: "Stasiun Terbanggi Besar, Sumatra Tengah (Grissik–Duri line)",          lat: "0.5000",  lon: "101.8000", city: "Riau",           grade: enterprise, p_out_sp: "14" }
   - { code: BJN, name: "Bojonegara",   location: "Stasiun Bojonegara, Cilegon/Serang, Banten",                       lat: "-5.9020", lon: "106.0780", city: "Cilegon",        grade: enterprise, p_out_sp: "15" }
