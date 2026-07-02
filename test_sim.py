@@ -102,7 +102,7 @@ def test_continuity_walks_not_teleports():
 
 def test_continuity_counter_holds():
     """jitter=0 (a fault count / SMART sectors) must HOLD once in a band, not
-    bounce across [lo,hi] every tick — the exact bug the user flagged."""
+    bounce across [lo,hi] every tick."""
     sim = Sim("numeric", [State(0.9, "good", None, 0, 0, 0),
                           State(0.08, "underperform", None, 1, 40, 0),
                           State(0.02, "failed", None, 200, 800, 0)])
@@ -217,12 +217,11 @@ def test_fmt_eta():
 
 
 def test_backfill_bucket_scheduler_fires_every_due_tick():
-    """run_backfill was rewritten from an O(n_streams)-scan-per-tick loop to
-    scheduling by shared interval bucket. This proves the swap didn't drop or
-    duplicate a single event: exact expected count per stream, mixing streams
-    that share an interval (exercise the bucket-grouping path) with streams
-    on staggered intervals (exercise independent ticks), real zabbix send()
-    faked out."""
+    """run_backfill schedules by shared interval bucket, not per stream. This
+    proves the bucketing neither drops nor duplicates a single event: exact
+    expected count per stream, mixing streams that share an interval (the
+    bucket-grouping path) with streams on staggered intervals (independent
+    ticks), real zabbix send() faked out."""
     import math
     import zabbix_utils
     from otobs.catalog import AssetClass, Host

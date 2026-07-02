@@ -1,8 +1,8 @@
 """Provision Zabbix from the catalog: template groups, host groups, templates,
 trapper items, triggers, and hosts. Idempotent — safe to re-run.
 
-Industry-grade layout: items+triggers live on a Template per asset class; each
-host links its template (config-as-code, not click-ops)."""
+Items and triggers live on one Template per asset class; each host links its
+template, so a metric is defined once regardless of how many stations exist."""
 from __future__ import annotations
 from zabbix_utils import ZabbixAPI
 

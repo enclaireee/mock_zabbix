@@ -254,8 +254,8 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     same tick for the entire run -- catalogs are typically a handful of
     distinct intervals (5s/30s/1m/...) shared by many streams. Checking one
     due-time per bucket instead of per stream turns an O(n_streams) scan into
-    O(n_intervals); degrades to the old per-stream cost only if every stream
-    has a unique interval, never worse.
+    O(n_intervals); degrades to a per-stream scan only if every stream has a
+    unique interval, never worse.
     """
     from zabbix_utils import ItemValue, Sender
 

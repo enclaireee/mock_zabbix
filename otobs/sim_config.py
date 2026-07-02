@@ -1,9 +1,9 @@
 """Load + validate catalog/sim_config.yml — the realism layer over the catalog.
 
-Orthogonal to catalog.py (which owns bands/weights/triggers). Five independently
-toggleable features: correlation, trend, time_of_day, dropout, backfill. Every
-feature defaults OFF and is a strict no-op when disabled — so an absent file, or
-one with everything `enabled: false`, means today's exact behavior.
+Orthogonal to catalog.py (which owns bands/weights/triggers). Six independently
+toggleable features: continuity, correlation, trend, time_of_day, dropout,
+backfill. Every feature defaults OFF and is a strict no-op when disabled — so an
+absent file, or one with everything `enabled: false`, is the plain state machine.
 
 Ranges are validated here at load time (loud fail on a bad number); parameter/band
 references are validated by validate() once the catalog is known.

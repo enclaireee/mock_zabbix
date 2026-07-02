@@ -72,7 +72,8 @@ for the parsing rules. Real environment variables override `.env`.
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `zabbix` | compose | Backing Postgres credentials |
 | `ZBX_WEB_PORT` | `8080` | compose | Host port for the web UI + API |
 | `ZBX_TRAPPER_PORT` | `10051` | compose | Host port for the trapper (simulator target) |
-| `PHP_TZ` / `ZBX_TIMEZONE` | `Asia/Jakarta` | compose | Frontend timezone |
+| `PHP_TZ` | `Asia/Jakarta` | compose | Frontend timezone |
+| `ZBX_TIMEZONE` | `Asia/Jakarta` | simulate | Local clock for the `time_of_day` realism feature |
 | `ZBX_API_URL` | `http://127.0.0.1:8080` | provision | Zabbix API base URL |
 | `ZBX_API_USER` / `ZBX_API_PASSWORD` | `Admin` / `zabbix` | provision | API login (must match the frontend) |
 | `ZBX_SENDER_HOST` / `ZBX_SENDER_PORT` | `127.0.0.1` / `10051` | simulate | Where the simulator pushes trapper data |

@@ -6,7 +6,7 @@
 #     continuity.reversion (mean-reversion to the band centre).
 #   * Gas throughput is diurnal -> flow, compressor load and operator activity
 #     follow daily demand (lowest overnight, higher through the working day).
-#     Modeled by time_of_day, which now shifts the continuity setpoint.
+#     Modeled by time_of_day, which shifts the continuity setpoint.
 #   * Faults are causal -> a real failure drags physically-connected params with
 #     it (lost lube oil overheats the bearing, which shakes the rotor, ...).
 #   * Field links occasionally drop a reading.
@@ -22,7 +22,7 @@ continuity:
   reversion: 0.12        # pull back to setpoint each tick — a controlled loop, not a walk
 
 # Daily demand cycle. With continuity on, this shifts the setpoint the value is held
-# to (no longer shadowed by the walk). Peak hours in local time (settings.TIMEZONE).
+# to (rather than scaling the raw sample). Peak hours in local time (settings.TIMEZONE).
 time_of_day:
   enabled: true
   profiles:

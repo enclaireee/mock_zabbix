@@ -107,4 +107,4 @@ eight modes and six features are documented in [sim-config.md](sim-config.md).
 This is a **data-plane** change only: the config plane (items, triggers,
 templates) is untouched, so the production swap-in story is unaffected. `make
 check` validates the file against the catalog. Full schema and semantics:
-[sim-states.md](sim-states.md).
+[sim-config.md](sim-config.md); the state machine itself: [sim-states.md](sim-states.md).

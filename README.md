@@ -12,7 +12,7 @@ will train on.
 ## Single source of truth
 
 The catalog files in [`catalog/`](catalog/) drive **everything**:
-0
+
 ```
 catalog/*.yml ──┬──> provision  (Zabbix API: templates, items, triggers, hosts)
                 └──> simulate    (Trapper push: Good/Underperform/Failed streams)
