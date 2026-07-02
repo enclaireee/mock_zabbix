@@ -37,34 +37,40 @@ class Provisioner:
         return got[0]["templateid"] if got else \
             self.api.template.create(host=name, groups=[{"groupid": tg_id}])["templateids"][0]
 
-    def _item(self, template_id: str, p: Parameter, existing: set[str]) -> None:
-        if p.key in existing:
+    def _item(self, template_id: str, p: Parameter, existing: dict[str, dict]) -> None:
+        want = {"name": p.name, "value_type": p.value_type_code,
+                "units": p.units, "description": p.description()}
+        got = existing.get(p.key)
+        if got is None:
+            self.api.item.create(hostid=template_id, key_=p.key, type=2, **want)
+            print(f"    + item {p.key}")
             return
-        self.api.item.create(
-            hostid=template_id, name=p.name, key_=p.key,
-            type=2,
-            value_type=p.value_type_code,
-            units=p.units,
-            description=p.description(),
-        )
-        print(f"    + item {p.key}")
+        # The API returns everything as strings; compare in string space.
+        diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
+        if diff:
+            self.api.item.update(itemid=got["itemid"], **diff)
+            print(f"    ~ item {p.key} (updated: {', '.join(diff)})")
 
-    def _triggers(self, template_name: str, p: Parameter, existing: set[str]) -> None:
+    def _triggers(self, template_name: str, p: Parameter, existing: dict[str, dict]) -> None:
         for t in p.triggers:
             desc = f"{p.name}: {t.label}"
-            if desc in existing:
+            want = {"expression": f"{t.func}(/{template_name}/{p.key}){t.op}{t.value}",
+                    "priority": SEVERITY_CODE[t.severity]}
+            got = existing.get(desc)
+            if got is None:
+                self.api.trigger.create(description=desc, **want)
+                print(f"      ! trigger [{t.severity}] {t.label}")
                 continue
-            expr = f"{t.func}(/{template_name}/{p.key}){t.op}{t.value}"
-            self.api.trigger.create(
-                description=desc, expression=expr,
-                priority=SEVERITY_CODE[t.severity],
-            )
-            print(f"      ! trigger [{t.severity}] {t.label}")
+            diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
+            if diff:
+                self.api.trigger.update(triggerid=got["triggerid"], **diff)
+                print(f"      ~ trigger [{t.severity}] {t.label} (updated: {', '.join(diff)})")
 
     def _host(self, h, hg_id: str, template_id: str, existing: dict[str, str]) -> None:
         inv = h.inventory
         if h.host in existing:
             self.api.host.update(hostid=existing[h.host], name=h.name,
+                                 macros=[{"macro": k, "value": v} for k, v in h.macros.items()],
                                  inventory_mode=0 if inv else -1, inventory=inv)
             print(f"    ~ host {h.host} (data synced)")
             return
@@ -105,8 +111,14 @@ class Provisioner:
         template_id = self._template(asset.template_name, tg_id)
         print(f"  template '{asset.template_name}' ({len(asset.parameters)} params)")
 
-        items = {i["key_"] for i in self.api.item.get(templateids=template_id, output=["key_"])}
-        triggers = {t["description"] for t in self.api.trigger.get(templateids=template_id, output=["description"])}
+        # One fetch per object kind, scoped to the template — the sets these
+        # feed avoid an N+1 storm of per-object existence checks.
+        items = {i["key_"]: i for i in self.api.item.get(
+            templateids=template_id,
+            output=["itemid", "key_", "name", "value_type", "units", "description"])}
+        triggers = {t["description"]: t for t in self.api.trigger.get(
+            templateids=template_id, expandExpression=True,
+            output=["triggerid", "description", "priority", "expression"])}
         host_names = [h.host for h in asset.hosts]
         hosts = {h["host"]: h["hostid"]
                  for h in self.api.host.get(filter={"host": host_names}, output=["host", "hostid"])}
@@ -114,13 +126,35 @@ class Provisioner:
         for p in asset.parameters:
             self._item(template_id, p, items)
             self._triggers(asset.template_name, p, triggers)
+
+        # Reconcile: template objects the catalog no longer defines are deleted,
+        # so a renamed key or trigger label doesn't leave an orphan behind.
+        # Triggers first — deleting an item cascades to its triggers, and we
+        # don't want to double-delete.
+        want_descs = {f"{p.name}: {t.label}" for p in asset.parameters for t in p.triggers}
+        for d, t in triggers.items():
+            if d not in want_descs:
+                self.api.trigger.delete(t["triggerid"])
+                print(f"    - pruned stale trigger '{d}'")
+        want_keys = {p.key for p in asset.parameters}
+        for k, i in items.items():
+            if k not in want_keys:
+                self.api.item.delete(i["itemid"])
+                print(f"    - pruned stale item {k}")
+
         for h in asset.hosts:
             self._host(h, hg_id, template_id, hosts)
 
 
 def main() -> None:
     assets = load_all()
-    prov = Provisioner()
+    try:
+        prov = Provisioner()
+    except Exception as e:  # noqa: BLE001 — zabbix_utils raises several kinds here
+        raise SystemExit(
+            f"Cannot log in to the Zabbix API at {settings.API_URL}: {e}\n"
+            f"  - stack not up yet? `make up` (first boot imports the DB, ~30-60s; `make logs`)\n"
+            f"  - auth? ZBX_API_USER/ZBX_API_PASSWORD in .env must match the frontend login")
     try:
         prov.ensure_geomap()
         for a in assets:

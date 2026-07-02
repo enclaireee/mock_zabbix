@@ -145,7 +145,10 @@ Then `make provision`. To remove a station, delete its line and re-provision
 
 1. Edit a file in [`catalog/`](catalog/) — schema in [`catalog/README.md`](catalog/README.md).
 2. `make check` — validates the catalog + generator offline (catches typos before touching Zabbix).
-3. `make provision` — creates the new items/triggers (existing ones are skipped).
+3. `make provision` — reconciles Zabbix with the catalog: new items/triggers are
+   created, edited fields (name, units, severity…) are updated in place, and
+   parameters removed from the catalog are pruned from the template
+   (see [docs/provisioning-idempotency.md](docs/provisioning-idempotency.md)).
 4. `make simulate` — the new parameter streams automatically.
 
 ### Backfilling history

@@ -270,9 +270,10 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     start = end - days * 86400.0
     span = max(end - start, 1e-9)
 
+    # Scheduling is per interval bucket (group_due); Stream.next_due is only
+    # used by the live loop and stays untouched here.
     groups: dict[int, list[Stream]] = {}
     for s in streams:
-        s.next_due = start
         groups.setdefault(s.param.interval_s, []).append(s)
     group_due = {iv: start for iv in groups}
 
@@ -301,10 +302,8 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
         for iv, due_t in group_due.items():
             if due_t > vt:
                 continue
-            new_due = due_t + iv  # real interval -> correct historical spacing
-            group_due[iv] = new_due
+            group_due[iv] = due_t + iv  # real interval -> correct historical spacing
             for s in groups[iv]:
-                s.next_due = new_due
                 value = process_stream(s, vt, 1.0, cfg, forced, hour)
                 if value is not None:
                     batch.append(ItemValue(s.host, s.param.key, str(value), clock=int(vt)))

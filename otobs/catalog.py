@@ -71,14 +71,16 @@ class Sim:
     states: list[State]
 
     def __post_init__(self):
-        # A zero total would make normalized_weights() divide by zero at sample
-        # time; fail loudly at load instead, like every other bad-catalog case.
-        if sum(s.weight for s in self.states) <= 0:
+        # A zero total would make the weight normalization divide by zero at
+        # sample time; fail loudly at load instead, like every other bad-catalog
+        # case. Normalize once here — states never change after load.
+        total = sum(s.weight for s in self.states)
+        if total <= 0:
             raise ValueError(f"{self.kind} sim: state weights sum to 0")
+        self._normalized = [s.weight / total for s in self.states]
 
     def normalized_weights(self) -> list[float]:
-        total = sum(s.weight for s in self.states)
-        return [s.weight / total for s in self.states]
+        return self._normalized
 
 
 @dataclass
@@ -149,6 +151,10 @@ def _build_sim(raw: dict, where: str) -> Sim:
         return Sim(kind, states)
     if kind == "numeric":
         weights = raw.get("weights", ["good", "underperform", "failed"])
+        # zip() would silently truncate to the shorter list, dropping a band.
+        if len(weights) != 3:
+            raise ValueError(f"{where}: weights needs 3 entries (good/underperform/failed), "
+                             f"got {len(weights)}")
         states = []
         for band, w in zip(("good", "underperform", "failed"), weights):
             if band not in raw:

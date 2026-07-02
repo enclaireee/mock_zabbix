@@ -135,6 +135,39 @@ def test_continuity_reversion_and_tod():
     assert v2 > 54.0, f"time_of_day did not shift the continuity setpoint (v={v2})"
 
 
+def test_ramp_hands_off_to_walk():
+    """docs/sim-config.md: 'continuity + trend compose' — during a ramp the walk
+    is suspended; once the ramp ends the value is in the new band and the
+    continuity walk takes over from there."""
+    cfg = SimConfig(continuity=Continuity(True), trend=Trend(True, ramp_seconds=100))
+    s = Stream("H", param("t"), state_idx=0, last_value=50.0)
+    random.seed(9)
+    v = process_stream(s, now=0.0, scale=1.0, cfg=cfg,
+                       forced={("H", "t"): "failed"}, hour=0)  # arm ramp toward [86,99]
+    assert v < 86, "ramp should start below the new band"
+    after = process_stream(s, now=200.0, scale=1.0, cfg=cfg,
+                           forced={("H", "t"): "failed"}, hour=0)  # ramp expired
+    assert 86 <= after <= 99, f"post-ramp value should be in the new band ({after})"
+    prev = after
+    for _ in range(20):  # steady state: small continuity steps, in band
+        nxt = process_stream(s, now=300.0, scale=1.0, cfg=cfg,
+                             forced={("H", "t"): "failed"}, hour=0)
+        assert 86 <= nxt <= 99 and abs(nxt - prev) < 8, "walk did not take over in-band"
+        prev = nxt
+
+
+def test_numeric_weights_length_guard():
+    """A 2-entry weights list must fail at load, not silently drop the third band."""
+    from otobs.catalog import _build_sim
+    raw = {"kind": "numeric", "good": [0, 1], "underperform": [1, 2], "failed": [2, 3],
+           "weights": ["good", "underperform"]}
+    try:
+        _build_sim(raw, "x")
+        assert False, "short weights list accepted (band silently dropped)"
+    except ValueError:
+        pass
+
+
 def test_presets_validate_against_catalog():
     """Every shipped preset must reference only real param keys/bands, so a typo in
     a mode file is caught here, not at `make config` time."""

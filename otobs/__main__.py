@@ -6,7 +6,7 @@ from pathlib import Path
 from . import settings
 from .catalog import load_all
 from .simulate import sample, next_state
-from .sim_config import load_sim_config, load_sim_config_file, validate
+from .sim_config import SIM_CONFIG_FILE, load_sim_config, load_sim_config_file, validate
 
 
 def _param_bands(assets) -> dict[str, set]:
@@ -91,7 +91,7 @@ def cmd_config(rest: list[str]) -> None:
     """Select the simulation mode: copy a preset (or a custom file) to the active
     catalog/sim_config.yml, after validating it against the catalog. No arg = status."""
     presets = _presets()
-    active = settings.CATALOG_DIR / "sim_config.yml"
+    active = settings.CATALOG_DIR / SIM_CONFIG_FILE
     names = [p.stem for p in presets]
 
     if not rest:  # status view
@@ -133,8 +133,8 @@ def _flag(name: str, cast):
 
 
 def main() -> None:
-    cmds = {"provision": None, "simulate": None, "backfill": None,
-            "list": cmd_list, "check": cmd_check, "config": cmd_config}
+    # provision/simulate/backfill are lazy-imported so list/check/config stay
+    # offline (no zabbix_utils needed).
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if arg == "provision":
         from .provision import main as m; m()
@@ -148,10 +148,12 @@ def main() -> None:
             print("\nstopped.")
     elif arg == "config":
         cmd_config(sys.argv[2:])
-    elif arg in ("list", "check"):
-        cmds[arg]()
+    elif arg == "list":
+        cmd_list()
+    elif arg == "check":
+        cmd_check()
     else:
-        print(f"usage: python -m otobs {{{'|'.join(cmds)}}}")
+        print("usage: python -m otobs {provision|simulate|backfill|config|list|check}")
         sys.exit(2)
 
 
