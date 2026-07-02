@@ -13,13 +13,15 @@ A `Sim` has a `kind` and a list of `State` objects
 | Field    | Meaning                                                            |
 |----------|-------------------------------------------------------------------|
 | `weight` | selection weight (see [band weights](band-weights.md))            |
-| `band`   | `good` / `underperform` / `failed`, or `custom` for display-only  |
+| `band`   | `good` / `underperform` / `failed`, or `custom:<value>` for enum states with a numeric weight |
 | `value`  | enum states only: the fixed value (int / float / str)            |
 | `lo`,`hi`| numeric states only: inclusive band bounds                        |
 | `jitter` | numeric states only: Gaussian noise added on top of the band     |
 
-The `band` drives display and which triggers are expected to fire; `custom` is
-used for enum states whose weight was given as a number rather than a band token.
+The `band` drives display and which triggers are expected to fire. An enum state
+whose weight is a **number** (not a `good`/`underperform`/`failed` token) has no
+band class, so it's tagged `custom:<value>` — keyed off its value to keep each
+such state distinct (correlation and `_idx_of_band` address states by band).
 
 ## Realism layer — `catalog/sim_config.yml`
 
@@ -29,20 +31,30 @@ that samples uniformly (plus jitter) inside its current band. `sim_config.yml`
 behavior on top. **Every feature defaults off**; with the file absent or all
 `enabled: false`, the output is byte-for-byte the plain state machine.
 
+> **Full config reference + the eight ready-made modes** (`make config MODE=<name>`):
+> **[sim-config.md](sim-config.md)**. The table below is a summary.
+
 | Feature | Changes | How |
 |---|---|---|
+| `continuity` | **value sampling** | While in-band, step from the last reading instead of re-drawing the whole band: analog signals (`jitter>0`) mean-revert to a setpoint with noise (a PID loop), `jitter=0` counters hold. |
 | `correlation` | **state selection** | On a tick where a trigger param is in `trigger.band`, an affected param's next state is forced toward `bias_band` (prob. `strength`) instead of using its own weights. Per host; composable across groups. |
 | `trend` | **value sampling** | On a state transition, ramp from the last emitted value toward a fresh target inside the new band over `ramp_seconds` (÷ `SIM_TIME_SCALE`), with jitter — no band clamp during the ramp. |
 | `time_of_day` | **value sampling** | Multiply the sampled value by a peak/off-peak factor by local hour before jitter. |
 | `dropout` | **emission** | Skip a due send entirely (state frozen, `next_due` still advances) so a real gap forms. |
 | `backfill` | **timing** | Run the same machine over a past window, stamping each value with its historical `clock`. |
 
-To support trends, a `Stream` also carries `last_value` and the current ramp
-(`ramp_from` / `ramp_to` / `ramp_start`); these are inert when `trend` is off.
+To support continuity and trends, a `Stream` also carries `last_value` and the
+current ramp (`ramp_from` / `ramp_to` / `ramp_start`); these are inert when both
+`continuity` and `trend` are off.
 
 ## `sim_config.yml` schema (annotated)
 
 ```yaml
+continuity:
+  enabled: false
+  step_scale: 1.0             # per-tick noise = jitter × step_scale; <1 calmer, >1 jumpier
+  reversion: 0.0              # 0 = free walk; >0 = mean-revert analog signals to setpoint (PID)
+
 correlation:
   enabled: false
   groups:

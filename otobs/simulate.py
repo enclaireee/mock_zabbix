@@ -45,17 +45,35 @@ def _typed(v: float, value_type: str):
 
 def sample_stream(s: "Stream", st: State, now: float, scale: float,
                   cfg: SimConfig, hour: int):
-    """Value for this tick honoring trend ramp + time-of-day. Falls back to the
-    exact original sample() when neither is engaged — the strict no-op path."""
+    """Value for this tick honoring continuity walk + trend ramp + time-of-day.
+    Falls back to the exact original sample() when none is engaged — the no-op path."""
     sim = s.param.sim
     if sim.kind == "enum":
         return st.value
     ramp_dur = cfg.trend.ramp_for(s.param.key) / scale if cfg.trend.enabled else 0.0
     ramping = (cfg.trend.enabled and s.ramp_to is not None
                and ramp_dur > 0 and (now - s.ramp_start) < ramp_dur)
+    # Walk from the last value only while staying inside the current band (steady
+    # state). A transition lands the value in the new band via a fresh draw (or a
+    # ramp, if trend is on), then the walk takes over on the next tick.
+    walk = (cfg.continuity.enabled and not ramping
+            and s.last_value is not None and st.lo <= s.last_value <= st.hi)
     mult = cfg.time_of_day.multiplier(s.param.key, hour)
-    if not ramping and mult == 1.0:
+    if not ramping and not walk and mult == 1.0:
         return sample(sim, st, s.param.value_type)  # identical draws to legacy path
+    if walk:
+        if st.jitter > 0:
+            # PID-controlled analog signal: mean-revert toward a setpoint (band
+            # centre, shifted by any time-of-day multiplier) with proportional
+            # noise on top. Reversion keeps it hovering at setpoint like a real
+            # control loop instead of random-walking to a rail; time_of_day thus
+            # composes here (moves the setpoint) rather than being shadowed.
+            target = ((st.lo + st.hi) / 2.0) * mult
+            base = (s.last_value + cfg.continuity.reversion * (target - s.last_value)
+                    + random.gauss(0, cfg.continuity.step(st.jitter)))
+        else:
+            base = s.last_value  # counter/gauge: holds until an actual state change
+        return _typed(min(st.hi, max(st.lo, base)), s.param.value_type)
     if ramping:
         frac = (now - s.ramp_start) / ramp_dur
         base = s.ramp_from + (s.ramp_to - s.ramp_from) * frac

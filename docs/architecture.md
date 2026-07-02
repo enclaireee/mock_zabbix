@@ -91,8 +91,13 @@ An optional layer (`otobs/sim_config.py` → `catalog/sim_config.yml`) makes it
 look more like real telemetry, **each feature independently toggleable and off by
 default** (file absent or all `enabled: false` ⇒ identical to the plain machine):
 
+Pick a config with `make config MODE=<name>` (or `FILE=…`); the workflow is
+config → (optional) backfill → simulate, and backfill replays the active mode. The
+eight modes and six features are documented in [sim-config.md](sim-config.md).
+
 | Feature | Effect on the data plane |
 |---|---|
+| `continuity` | While a stream stays in a band, the next value is a random walk from the last reading (not a fresh full-band draw) — so values drift and zero-jitter counters hold, instead of teleporting each tick. |
 | `correlation` | Per host, when a trigger param is in a given band it biases correlated params' next state toward degrading (stalled fan → rising CPU temp). |
 | `trend` | On a state change, ramps from the last value toward a target inside the new band over `ramp_seconds` (respecting `SIM_TIME_SCALE`) — a curve, not a step. |
 | `time_of_day` | Scales a value by a peak/off-peak multiplier by local hour (`settings.TIMEZONE`) — operational cycles. |

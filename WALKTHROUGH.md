@@ -112,17 +112,22 @@ Two **global** knobs in `.env` calibrate it — `SIM_STICKINESS` (default **0.92
 high on purpose: smooth runs are the ML signal) and `SIM_TIME_SCALE` (default
 **10×**). Full variable reference: [RUNNING.md](RUNNING.md#5-configuration).
 
-That's the baseline. On its own it has four gaps: parameters never influence each
-other, transitions are instant steps, values ignore time of day, and no reading is
-ever missed. Section 5 closes them.
+That's the baseline. On its own it has five gaps: **values teleport across their
+band every tick** (a 28 barg pressure can read 34 barg 5 s later — no continuity),
+parameters never influence each other, transitions are instant steps, values ignore
+time of day, and no reading is ever missed. Section 5 closes them.
 
 ---
 
 ## 5. The realism layer — `catalog/sim_config.yml`
 
 An **optional** layer on top of the baseline, in its own file (kept out of `.env`
-because these are structured, per-parameter knobs, not global scalars). Five
-features, **each with its own `enabled` flag and every one off by default.**
+because these are structured, per-parameter knobs, not global scalars). Six
+features, **each with its own `enabled` flag and every one off by default.** You
+rarely hand-edit it — you pick a **mode** with `make config MODE=<name>` (eight presets
+in `presets/`: baseline, steady, realistic, diurnal, stress, maintenance, demo, ml —
+each validated against the catalog before it's activated). The workflow is
+config → optional `make backfill` (replays the mode) → `make simulate`.
 
 > **The invariant:** with `sim_config.yml` absent, or every feature `enabled:
 > false`, the simulator's output is **byte-for-byte identical** to the plain state
@@ -131,15 +136,17 @@ features, **each with its own `enabled` flag and every one off by default.**
 
 | Feature | The realism gap it closes | What it does |
 |---|---|---|
+| `continuity` | Values teleported across their band each tick | While a stream stays in a band, walks the value from the last reading by `±jitter` (clamped) instead of a fresh full-band draw — real vars *drift*, and `jitter=0` counters (fault counts, SMART sectors) *hold* until an actual state change. |
 | `correlation` | Params were fully independent | Per host, when a *trigger* param is in a given band, it biases *affected* params' next state toward degrading — a stalled fan drives CPU temp up. |
 | `trend` | Transitions were instant steps | On a state change, ramps from the last value toward a target inside the new band over `ramp_seconds`, jitter on top — a curve, not a jump. |
 | `time_of_day` | Values ignored the clock | Scales the value by a peak/off-peak multiplier by local hour (shift-hour load). |
 | `dropout` | Data never went missing | Occasionally skips a due send, leaving a real gap so Zabbix `nodata()` triggers finally fire. |
 | `backfill` | History only existed going forward | `make backfill` sweeps the machine over a past window and pushes each value with its historical timestamp. |
 
-Full annotated YAML schema, the causal/per-host semantics of each feature (the
-kind of detail that comes up in Q&A), and validation rules:
-[docs/sim-states.md](docs/sim-states.md).
+The **modes** (what each preset turns on and why), the full annotated YAML schema,
+the causal/per-host semantics of each feature (the kind of detail that comes up in
+Q&A), and validation rules: **[docs/sim-config.md](docs/sim-config.md)** (state
+machine itself: [docs/sim-states.md](docs/sim-states.md)).
 
 ---
 
@@ -223,13 +230,16 @@ separately) — the single call both `provision` and `simulate` consume.
 
 ### 9.3 `sim_config.py` — the realism loader (new)
 
-Mirrors `catalog.py`'s style: typed dataclasses (`Correlation`, `Trend`,
-`TimeOfDay`/`TodProfile`, `Dropout`, `Backfill`, wrapped in `SimConfig`) with
-small behavior methods (`Trend.ramp_for`, `TodProfile.multiplier`,
-`Dropout.prob_for`, `SimConfig.enabled_features`).
+Mirrors `catalog.py`'s style: typed dataclasses (`Continuity`, `Correlation`,
+`Trend`, `TimeOfDay`/`TodProfile`, `Dropout`, `Backfill`, wrapped in `SimConfig`)
+with small behavior methods (`Continuity.step`, `Trend.ramp_for`,
+`TodProfile.multiplier`, `Dropout.prob_for`, `SimConfig.enabled_features`).
 
-- `load_sim_config(dir=None)` — parses the file into those objects; **returns an
-  all-off `SimConfig()` if the file is absent.** Range checks (`_num`) run at load.
+- `load_sim_config_file(path)` — parses one YAML (any name) into those objects;
+  **returns an all-off `SimConfig()` if the file is absent.** `load_sim_config()`
+  is the thin wrapper that points it at the active `catalog/sim_config.yml`. The
+  `config` command uses the by-path form to validate a preset *before* activating
+  it. Range checks (`_num`) run at load.
 - `validate(cfg, param_bands)` — given `{key: {bands}}` from the catalog, asserts
   every referenced param/band exists. Called by `cmd_check`.
 
@@ -254,11 +264,12 @@ The value + state primitives:
 - `next_state(sim, cur, stickiness, forced_idx=None)` — sticky transition; if
   `forced_idx` is given (correlation), it returns that directly, overriding both
   stickiness and weights.
-- `sample_stream(s, st, now, scale, cfg, hour)` — the realism-aware sampler: if
-  neither a trend ramp nor a time-of-day multiplier applies it **returns `sample()`
-  unchanged** (identical draws); otherwise it interpolates the ramp and/or applies
-  the multiplier, **without** the band clamp. `correlation_forces(cfg, by_host)`
-  computes `{(host, key): bias_band}` from each trigger param's current band.
+- `sample_stream(s, st, now, scale, cfg, hour)` — the realism-aware sampler: if no
+  continuity walk, trend ramp, or time-of-day multiplier applies it **returns
+  `sample()` unchanged** (identical draws); a `continuity` walk steps from
+  `last_value` by `±jitter` clamped to the band; otherwise it interpolates the ramp
+  and/or applies the multiplier, **without** the band clamp. `correlation_forces(cfg,
+  by_host)` computes `{(host, key): bias_band}` from each trigger param's current band.
 - `Stream` — per (host, parameter); now also carries `last_value` and the ramp
   (`ramp_from`/`ramp_to`/`ramp_start`), inert unless `trend` is on.
 
@@ -285,17 +296,22 @@ The two drivers:
 
 ### 9.6 `__main__.py` — the CLI
 
-`python -m otobs {provision|simulate|backfill|list|check}`.
+`python -m otobs {provision|simulate|backfill|config|list|check}`.
 
 - `cmd_list()` — every asset class, its hosts, a line per parameter, **plus the
   enabled sim-config features**.
 - `cmd_check()` — the offline self-test: parse the catalog, run the generator 500×
   per parameter asserting in-band + correct type + valid triggers, **then
   `validate()` `sim_config.yml` against the catalog** and print the feature status.
+- `cmd_config(rest)` — the mode switcher: with no arg prints the active mode +
+  available presets; with a name (or `--file PATH`) it **validates the preset
+  against the catalog, then copies it to `catalog/sim_config.yml`.** A broken or
+  unknown mode fails loudly and changes nothing. Active mode is detected by
+  content-matching the live file against the presets.
 - `backfill` — parses `--days` / `--speed` (tiny `_flag` helper; argparse would be
   overkill) and calls `run_backfill`.
-- `main()` — dispatches, lazy-importing `provision`/`simulate` so `list`/`check`
-  stay offline (no `zabbix_utils`).
+- `main()` — dispatches, lazy-importing `provision`/`simulate` so
+  `list`/`check`/`config` stay offline (no `zabbix_utils`).
 
 ### 9.7 `test_sim.py` — the realism self-check
 
@@ -347,6 +363,7 @@ Trace `hmi.cpu.temp` on the Grissik HMI, with the realism layer **on**:
 cp .env.example .env       # central config
 make venv                  # build the Python env
 make up                    # start Zabbix — wait ~30-60s on first boot (DB import)
+make config MODE=realistic # pick the sim mode (validated against the catalog)
 make check                 # OFFLINE proof: catalog + generator + sim-config all sane
 make provision             # build all Zabbix config from the catalog (idempotent)
 make backfill DAYS=7 SPEED=5000   # optional: 7 days of history so graphs aren't empty
@@ -366,10 +383,10 @@ Then at **http://localhost:8080** (`Admin` / `zabbix`):
 
 - *Single source of truth:* add one line to `sites.yml`, `make provision`, and the
   new hosts appear on the map and start streaming — one line.
-- *Realism layer:* in `sim_config.yml` set `correlation.enabled: true` (and drop
-  `SIM_STICKINESS` so the fan actually reaches `failed`); `make simulate` and watch
-  `hmi.cpu.temp` follow the fan into degradation on the same host. Or enable
-  `trend` and show a ramp in the graph instead of a step.
+- *Realism layer:* `make config MODE=realistic` then `make simulate`, and watch
+  `hmi.cpu.temp` follow the stalled fan into degradation on the same host, values
+  drifting (not teleporting) and ramping on transitions. Switch to
+  `make config MODE=baseline` to show the flat, teleporting reference for contrast.
 
 ---
 
@@ -388,6 +405,19 @@ Then at **http://localhost:8080** (`Admin` / `zabbix`):
   **data-plane** feature. It only affects the *values* the simulator generates; the
   items, triggers, and templates `provision` builds are untouched. And it's fully
   optional: off by default, byte-identical to the plain machine when disabled.
+
+- **"What makes `realistic` realistic?"** Three grounded properties of real plant
+  telemetry: process variables are PID-controlled so they *hover at a setpoint* with
+  small noise (continuity's mean-reversion), not wander their whole range; gas
+  throughput is *diurnal* (time-of-day shifts the setpoint); and faults are *causal*,
+  dragging connected params along (the per-host correlation web). Full rationale:
+  [docs/sim-config.md](docs/sim-config.md).
+
+- **"How do the modes and backfill relate?"** `make config MODE=x` picks one of eight
+  presets (validated against the catalog before it's activated). The workflow is
+  **config → optional `make backfill` → `make simulate`**: backfill *replays the active
+  mode* over that mode's past window, so history and live stream share the same realism.
+  No mode ever backfills automatically — it's always the manual step.
 
 - **"How is correlation not just noise?"** It's causal and per-host: it reads the
   *current* band of a named trigger param and biases a named affected param toward
@@ -426,10 +456,10 @@ Then at **http://localhost:8080** (`Admin` / `zabbix`):
 > A single-source-of-truth YAML catalog drives a **real Zabbix 7.0 stack** two
 > ways: one tool **provisions** it (idempotent config-as-code) and another
 > **simulates** OT/IT telemetry into it (a sticky Good/Underperform/Failed state
-> machine over Trapper, each metric on its own compressed clock). An optional
-> `sim_config.yml` layer adds realism on demand — cross-parameter correlation,
-> gradual trends, time-of-day cycles, data dropout, and one-shot historical
-> backfill — each toggleable and off by default, so the baseline is unchanged. It
+> machine over Trapper, each metric on its own compressed clock). A selectable
+> `sim_config.yml` layer (`make config MODE=…`) adds realism on demand — value
+> continuity, cross-parameter correlation, gradual trends, time-of-day cycles, and
+> data dropout — each toggleable and off by default, so the baseline is unchanged. It
 > models a PGN gas station across 3 sites and 41 parameters, honestly tagging what's
 > natively collectable vs. what needs an S7comm/Node-RED bridge. Because the config
 > plane is production-shaped, swapping mock data for real collectors is a one-line

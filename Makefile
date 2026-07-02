@@ -33,10 +33,13 @@ simulate: venv ## Stream Good/Underperform/Failed mock data into Zabbix (Ctrl+C 
 backfill: venv ## Backfill historical data (override DAYS=/SPEED=; else catalog/sim_config.yml)
 	$(PY) -m otobs backfill $(if $(DAYS),--days $(DAYS)) $(if $(SPEED),--speed $(SPEED))
 
+config: venv ## Select sim mode (MODE=<name> or FILE=path.yml); no arg lists modes + status
+	$(PY) -m otobs config $(if $(FILE),--file $(FILE),$(MODE))
+
 list: venv ## Print the parsed catalog (sanity view)
 	$(PY) -m otobs list
 
 check: venv ## Run the self-check (catalog + generator), no Zabbix needed
 	$(PY) -m otobs check
 
-.PHONY: help venv up down clean logs provision simulate backfill list check
+.PHONY: help venv up down clean logs provision simulate backfill config list check

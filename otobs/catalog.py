@@ -1,6 +1,7 @@
 """Load + validate catalog/*.yml into typed objects. Single source of truth."""
 from __future__ import annotations
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 import yaml
 
@@ -18,12 +19,16 @@ SEVERITY_CODE = {
 
 
 def parse_interval(s: str) -> int:
-    """'15s' -> 15, '5m' -> 300, '1h' -> 3600."""
+    """'15s' -> 15, '5m' -> 300, '1h' -> 3600. Must be > 0 (a 0 interval would
+    make the backfill scheduler and live loop spin forever)."""
     s = str(s).strip()
-    unit = _INTERVAL_UNITS.get(s[-1])
+    unit = _INTERVAL_UNITS.get(s[-1:])
     if unit is None or not s[:-1].isdigit():
         raise ValueError(f"bad interval {s!r} (use e.g. 15s, 1m, 1h)")
-    return int(s[:-1]) * unit
+    secs = int(s[:-1]) * unit
+    if secs <= 0:
+        raise ValueError(f"interval {s!r} must be > 0")
+    return secs
 
 
 def _weight(w) -> float:
@@ -65,6 +70,12 @@ class Sim:
     kind: str
     states: list[State]
 
+    def __post_init__(self):
+        # A zero total would make normalized_weights() divide by zero at sample
+        # time; fail loudly at load instead, like every other bad-catalog case.
+        if sum(s.weight for s in self.states) <= 0:
+            raise ValueError(f"{self.kind} sim: state weights sum to 0")
+
     def normalized_weights(self) -> list[float]:
         total = sum(s.weight for s in self.states)
         return [s.weight / total for s in self.states]
@@ -84,8 +95,9 @@ class Parameter:
     sim: Sim
     triggers: list[Trigger] = field(default_factory=list)
 
-    @property
+    @cached_property
     def interval_s(self) -> int:
+        # Parsed once per parameter, not re-parsed on every tick of the live loop.
         return parse_interval(self.interval)
 
     @property
@@ -126,9 +138,12 @@ def _build_sim(raw: dict, where: str) -> Sim:
         for st in raw.get("states", []):
             if "value" not in st or "weight" not in st:
                 raise ValueError(f"{where}: enum state needs 'value' and 'weight': {st!r}")
-            states.append(State(weight=_weight(st["weight"]),
-                                 band=st["weight"] if isinstance(st["weight"], str) else "custom",
-                                 value=st["value"]))
+            # A string weight IS the band (good/underperform/failed). A numeric
+            # weight has no band token, so key the band off the value to keep each
+            # state distinct — otherwise every such state collapses to one "custom"
+            # band and correlation/_idx_of_band can't tell them apart.
+            band = st["weight"] if isinstance(st["weight"], str) else f"custom:{st['value']}"
+            states.append(State(weight=_weight(st["weight"]), band=band, value=st["value"]))
         if not states:
             raise ValueError(f"{where}: enum sim has no states")
         return Sim(kind, states)
@@ -158,7 +173,10 @@ def _build_param(raw: dict, where: str) -> Parameter:
     if raw["value_type"] not in VALUE_TYPE_CODE:
         raise ValueError(f"{where}: bad value_type {raw['value_type']!r}")
     parse_interval(raw["interval"])
-    triggers = [Trigger(**t) for t in raw.get("triggers", [])]
+    try:
+        triggers = [Trigger(**t) for t in raw.get("triggers", [])]
+    except TypeError as e:  # unknown/missing trigger field -> ValueError like the rest
+        raise ValueError(f"{where}.{raw.get('key','?')}: bad trigger fields: {e}")
     return Parameter(
         key=raw["key"], name=raw["name"], value_type=raw["value_type"],
         units=raw.get("units", ""), interval=raw["interval"],
@@ -236,4 +254,15 @@ def load_all(directory: Path | None = None) -> list[AssetClass]:
                    if p.name not in ("sites.yml", "sim_config.yml"))
     if not files:
         raise ValueError(f"no catalog *.yml in {directory}")
-    return [load_file(p, sites) for p in files]
+    assets = [load_file(p, sites) for p in files]
+    # Keys must be unique across ALL files, not just within one: sim_config
+    # validation and the trapper both address items by bare key, so a cross-file
+    # collision would silently shadow one parameter.
+    seen: dict[str, str] = {}
+    for a in assets:
+        for p in a.parameters:
+            if p.key in seen:
+                raise ValueError(f"duplicate item key {p.key!r} in {a.asset_class!r} "
+                                 f"(already defined in {seen[p.key]!r})")
+            seen[p.key] = a.asset_class
+    return assets

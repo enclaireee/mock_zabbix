@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG_DIR = ROOT / "catalog"
+PRESETS_DIR = ROOT / "presets"        # sim-config mode templates (`make config`)
 
 
 def _load_env() -> None:

@@ -1,0 +1,51 @@
+# preset: stress — exercise the MONITORING side, not the plant.
+# Strong causal cascades, short ramps so problems escalate fast, and heavy dropout
+# so nodata() triggers fire often. Pair with a LOW SIM_STICKINESS in .env (≈0.80)
+# so states churn and problems appear/clear frequently.
+#   make config MODE=stress && make check && make backfill DAYS=2 && make simulate
+
+continuity:
+  enabled: true
+  step_scale: 1.2        # jumpier lines
+  reversion: 0.05        # barely controlled — values roam
+
+# Same causal web as realistic but forced hard (high strength) for visible cascades.
+correlation:
+  enabled: true
+  groups:
+    - name: "lube_starvation"
+      trigger: { param: "proc.comp.lube_oil_pressure", band: "failed" }
+      affects:
+        - { param: "proc.comp.bearing_temp", bias_band: "failed",       strength: 1.0 }
+        - { param: "proc.comp.vibration",    bias_band: "underperform", strength: 0.9 }
+    - name: "supply_loss"
+      trigger: { param: "proc.pressure.inlet", band: "failed" }
+      affects:
+        - { param: "proc.flow.rate",             bias_band: "underperform", strength: 1.0 }
+        - { param: "proc.comp.suction_pressure", bias_band: "underperform", strength: 1.0 }
+    - name: "thermal_cascade"
+      trigger: { param: "hmi.fan.rpm", band: "failed" }
+      affects:
+        - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 1.0 }
+    - name: "switch_thermal"
+      trigger: { param: "net.env.fan_state", band: "failed" }
+      affects:
+        - { param: "net.if.error_rate", bias_band: "underperform", strength: 1.0 }
+        - { param: "net.if.discards",   bias_band: "underperform", strength: 0.9 }
+    - name: "io_fault_storm"
+      trigger: { param: "plc.io.channels_faulted", band: "failed" }
+      affects:
+        - { param: "plc.diag.event_rate", bias_band: "underperform", strength: 1.0 }
+
+trend:
+  enabled: true
+  ramp_seconds: 300      # short ramps: escalate to failed quickly
+
+dropout:
+  enabled: true
+  probability: 0.10      # frequent gaps -> nodata() fires often
+  overrides:
+    hmi.smart.health_passed: { probability: 0.0 }
+
+time_of_day: { enabled: false }
+backfill:    { enabled: false, days: 2, speed_multiplier: 300 }

@@ -1,11 +1,12 @@
-"""CLI: python -m otobs {provision|simulate|backfill|list|check}."""
+"""CLI: python -m otobs {provision|simulate|backfill|list|check|config}."""
 from __future__ import annotations
 import sys
+from pathlib import Path
 
 from . import settings
 from .catalog import load_all
 from .simulate import sample, next_state
-from .sim_config import load_sim_config, validate
+from .sim_config import load_sim_config, load_sim_config_file, validate
 
 
 def _param_bands(assets) -> dict[str, set]:
@@ -71,6 +72,57 @@ def cmd_check() -> None:
     print(f"sim-config valid — features enabled: {', '.join(feats) if feats else 'none'}.")
 
 
+def _presets() -> list[Path]:
+    return sorted(settings.PRESETS_DIR.glob("*.yml"))
+
+
+def _active_mode(active: Path, presets: list[Path]) -> str:
+    """Name of the preset matching the live sim_config.yml, else 'custom'/'none'."""
+    if not active.exists():
+        return "none (baseline)"
+    txt = active.read_text()
+    for p in presets:
+        if p.read_text() == txt:
+            return p.stem
+    return "custom"
+
+
+def cmd_config(rest: list[str]) -> None:
+    """Select the simulation mode: copy a preset (or a custom file) to the active
+    catalog/sim_config.yml, after validating it against the catalog. No arg = status."""
+    presets = _presets()
+    active = settings.CATALOG_DIR / "sim_config.yml"
+    names = [p.stem for p in presets]
+
+    if not rest:  # status view
+        print(f"Active mode: {_active_mode(active, presets)}")
+        feats = load_sim_config().enabled_features()
+        print(f"  enabled features: {', '.join(feats) if feats else 'none (baseline)'}")
+        print(f"Available modes: {', '.join(names)}")
+        print("Usage: make config MODE=<name>   |   make config FILE=<path.yml>")
+        return
+
+    if rest[0] == "--file":
+        if len(rest) < 2:
+            print("config --file needs a path"); sys.exit(2)
+        src = Path(rest[1])
+        if not src.exists():
+            print(f"no such file: {src}"); sys.exit(2)
+    else:
+        src = settings.PRESETS_DIR / f"{rest[0]}.yml"
+        if not src.exists():
+            print(f"unknown mode {rest[0]!r}. Available: {', '.join(names)}"); sys.exit(2)
+
+    assets = load_all()
+    param_bands = _param_bands(assets)
+    validate(load_sim_config_file(src), param_bands)  # loud fail before we activate it
+    active.write_text(src.read_text())
+    feats = load_sim_config().enabled_features()
+    print(f"Activated '{src.stem}' -> catalog/sim_config.yml")
+    print(f"  enabled features: {', '.join(feats) if feats else 'none (baseline)'}")
+    print("Run `make check` then `make simulate` (or `make backfill`).")
+
+
 def _flag(name: str, cast):
     """Pull `--name VALUE` out of argv, or None. Tiny; argparse is overkill here."""
     if name in sys.argv:
@@ -82,7 +134,7 @@ def _flag(name: str, cast):
 
 def main() -> None:
     cmds = {"provision": None, "simulate": None, "backfill": None,
-            "list": cmd_list, "check": cmd_check}
+            "list": cmd_list, "check": cmd_check, "config": cmd_config}
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if arg == "provision":
         from .provision import main as m; m()
@@ -94,6 +146,8 @@ def main() -> None:
             run_backfill(load_all(), days=_flag("--days", float), speed=_flag("--speed", float))
         except KeyboardInterrupt:
             print("\nstopped.")
+    elif arg == "config":
+        cmd_config(sys.argv[2:])
     elif arg in ("list", "check"):
         cmds[arg]()
     else:

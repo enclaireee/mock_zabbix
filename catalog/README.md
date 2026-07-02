@@ -5,10 +5,11 @@ source of truth consumed by `otobs.provision` (Zabbix config) and
 `otobs.simulate` (mock data).
 
 > Two files here are **not** asset classes and are loaded separately:
-> `sites.yml` (the station registry, below) and `sim_config.yml` (the optional
-> simulation realism layer — correlation, trend, time-of-day, dropout, backfill;
-> see [docs/sim-states.md](../docs/sim-states.md)). `sim_config.yml` is orthogonal
-> to the per-parameter `sim:` block described below and does not replace it.
+> `sites.yml` (the station registry, below) and `sim_config.yml` (the active
+> simulation realism layer — continuity, correlation, trend, time-of-day, dropout,
+> backfill — swapped by `make config MODE=…`; see
+> [docs/sim-config.md](../docs/sim-config.md)). `sim_config.yml` is orthogonal to
+> the per-parameter `sim:` block described below and does not replace it.
 
 ## Station registry (`sites.yml`)
 
@@ -64,8 +65,9 @@ the Zabbix item **description** — living documentation inside the tool.
 
 ## `sim` — two kinds
 
-**numeric** — three value bands; the simulator samples uniformly within the
-current band plus `jitter`:
+**numeric** — three value bands; by default the simulator samples uniformly within
+the current band plus `jitter` (with the `continuity` mode feature on, it instead
+walks from the last reading by `jitter` — see [docs/sim-config.md](../docs/sim-config.md)):
 
 ```yaml
 sim:

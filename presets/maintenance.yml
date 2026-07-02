@@ -1,0 +1,32 @@
+# preset: maintenance — a plant with sensors/links coming in and out of service.
+# Heavy, uneven dropout across many streams (bays isolated, RTUs rebooted, loops
+# under calibration) so lots of nodata() gaps form — the realism target here is
+# MISSING data, not degradation. The plant itself stays mostly healthy and calm.
+#   make config MODE=maintenance && make check && make backfill DAYS=3 && make simulate
+
+continuity:
+  enabled: true
+  step_scale: 0.6
+  reversion: 0.12
+
+# No forced cascades — this mode is about data availability, not failures.
+correlation: { enabled: false }
+
+trend:
+  enabled: true
+  ramp_seconds: 1800
+
+# Frequent gaps, worse on the field/instrument links than on the safety verdicts.
+dropout:
+  enabled: true
+  probability: 0.08
+  overrides:
+    proc.pressure.inlet:      { probability: 0.20 }   # transmitter under calibration
+    proc.flow.rate:           { probability: 0.20 }   # meter run isolated
+    plc.cp.icmp_latency:      { probability: 0.25 }   # CP rebooting
+    net.if.error_rate:        { probability: 0.15 }
+    hmi.smart.health_passed:  { probability: 0.0 }    # never drop the safety verdict
+    proc.fire_gas.status:     { probability: 0.0 }    # never drop fire & gas
+
+time_of_day: { enabled: false }
+backfill:    { enabled: false, days: 3, speed_multiplier: 500 }

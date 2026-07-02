@@ -47,7 +47,8 @@ Each doc has one job; none repeat another's content.
 | **[WALKTHROUGH.md](WALKTHROUGH.md)** | What is this, why does it exist, and how do I present/defend it? (narrative, demo script, Q&A) |
 | **[docs/architecture.md](docs/architecture.md)** | How do the pieces fit together, and how does the mock map to real OT collectors? |
 | **[catalog/README.md](catalog/README.md)** | What's the YAML schema for `catalog/*.yml`? |
-| **[docs/sim-states.md](docs/sim-states.md)** | How does the simulator state machine work, and what does `sim_config.yml` do? |
+| **[docs/sim-states.md](docs/sim-states.md)** | How does the simulator state machine work (states, bands, sticky transitions)? |
+| **[docs/sim-config.md](docs/sim-config.md)** | The sim **modes** (`make config`) and the six `sim_config.yml` realism features, in full. |
 | **[docs/band-weights.md](docs/band-weights.md)** | What do the `good`/`underperform`/`failed` weight tokens mean? |
 | **[docs/env-loading.md](docs/env-loading.md)** | How does `.env` get parsed into settings? |
 | **[docs/geomap.md](docs/geomap.md)** | How does the Zabbix Geomap widget get wired up? |
@@ -58,14 +59,15 @@ Each doc has one job; none repeat another's content.
 
 ```
 catalog/            asset-class definitions (the source of truth) + schema docs
-  └─ sim_config.yml optional realism layer (correlation/trend/time-of-day/dropout/backfill)
+  └─ sim_config.yml active realism config (continuity/correlation/trend/time-of-day/dropout/backfill)
+presets/            ready-made sim modes copied in by `make config` (baseline/steady/realistic/diurnal/stress/maintenance/demo/ml)
 otobs/              python package
   ├─ catalog.py     load + validate catalog/*.yml into typed objects
   ├─ provision.py   Zabbix API: templates, items, triggers, hosts (idempotent)
   ├─ simulate.py    sticky Good/Underperform/Failed state machine → Trapper (+ backfill)
   ├─ sim_config.py  load + validate sim_config.yml into typed objects
   ├─ settings.py    reads .env
-  └─ __main__.py    CLI: provision | simulate | backfill | list | check
+  └─ __main__.py    CLI: provision | simulate | backfill | config | list | check
 docs/               architecture + implementation-detail reference docs (see map above)
 RUNNING.md          install / run / configure / troubleshoot
 WALKTHROUGH.md      narrative tour, demo script, Q&A

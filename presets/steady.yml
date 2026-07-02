@@ -1,0 +1,39 @@
+# preset: steady — a healthy plant on a normal day.
+# All the realism of `realistic` but calmer: gentle continuity, a light daily
+# cycle, the main causal chains, and NO dropout. Few problems; smooth lines.
+# Best with the default/high SIM_STICKINESS so states rarely leave `good`.
+#   make config MODE=steady && make check && make backfill && make simulate
+
+continuity:
+  enabled: true
+  step_scale: 0.5        # very calm lines
+  reversion: 0.15        # firmly held at setpoint
+
+time_of_day:
+  enabled: true
+  profiles:
+    - { param: "proc.flow.rate",  peak_hours: [6, 22], peak_multiplier: 1.08, off_peak_multiplier: 0.92 }
+    - { param: "hmi.cpu.util",    peak_hours: [7, 19], peak_multiplier: 1.20, off_peak_multiplier: 0.80 }
+
+# Only the strongest, most physical chains — a calm plant still cascades on a real fault.
+correlation:
+  enabled: true
+  groups:
+    - name: "lube_starvation"
+      trigger: { param: "proc.comp.lube_oil_pressure", band: "failed" }
+      affects:
+        - { param: "proc.comp.bearing_temp", bias_band: "failed", strength: 0.6 }
+    - name: "thermal_cascade"
+      trigger: { param: "hmi.fan.rpm", band: "failed" }
+      affects:
+        - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 0.6 }
+
+trend:
+  enabled: true
+  ramp_seconds: 2400
+  overrides:
+    hmi.cpu.temp:           { ramp_seconds: 3600 }
+    proc.comp.bearing_temp: { ramp_seconds: 3600 }
+
+dropout:  { enabled: false }
+backfill: { enabled: false, days: 14, speed_multiplier: 1000 }

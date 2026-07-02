@@ -57,6 +57,7 @@ Open **http://localhost:8080** → login **`Admin` / `zabbix`**:
 | `make provision` | Apply the catalog to Zabbix (idempotent — re-run after edits) |
 | `make simulate` | Stream mock telemetry via Trapper (live, forward in time) |
 | `make backfill` | Generate backdated history in one shot (`DAYS=` / `SPEED=` to tune) |
+| `make config` | Select the sim mode (`MODE=realistic\|ml\|stress\|baseline` or `FILE=path.yml`); no arg = status |
 | `make list` | Print the parsed catalog + which sim-config features are on |
 | `make check` | Offline self-test (catalog + generator + sim-config), **no Zabbix needed** |
 
@@ -84,22 +85,46 @@ for the parsing rules. Real environment variables override `.env`.
 `SIM_STICKINESS` / `SIM_TIME_SCALE` are global scalars. Richer, structured
 realism knobs live in a separate file — see below.
 
-### Realism layer — `catalog/sim_config.yml`
+### Realism layer & modes — `catalog/sim_config.yml`
 
-An optional layer on top of the per-parameter bands. Five features, **each with
+An optional layer on top of the per-parameter bands. Six features, **each with
 its own `enabled` flag and off by default** — with the file absent or everything
-`false`, the simulator behaves exactly as the plain state machine does. Full
-schema and semantics: [docs/sim-states.md](docs/sim-states.md).
+`false`, the simulator behaves exactly as the plain state machine does.
+
+Rather than hand-edit, pick a **mode** — a ready-made preset from `presets/`. The
+workflow is **config → (optional) backfill → simulate**, and backfill replays whatever
+mode is active:
+
+```bash
+make config                    # show the active mode + what's available
+make config MODE=realistic     # flagship: how a real station behaves (setpoints, cycles, cascades)
+make config MODE=steady        # a healthy plant on a normal day — calm, few problems
+make config MODE=diurnal       # daily / shift-hour demand cycles
+make config MODE=stress        # frequent problems + nodata() alerts, to exercise monitoring
+make config MODE=maintenance   # sensors/links dropping in and out (lots of nodata gaps)
+make config MODE=demo          # punchy fast cascades for a 5-minute live walkthrough
+make config MODE=ml            # long smooth labelled curves, for Tahap 2/3 training
+make config MODE=baseline      # every feature off (the reference behavior)
+make config FILE=mine.yml      # your own custom file
+
+make backfill                  # optional: replay the active mode over its past window
+make simulate                  # stream live with the active mode
+```
+
+`make config` validates the chosen file against the catalog and only then copies it
+to `catalog/sim_config.yml`. No mode ever runs a backfill on its own — it's always the
+manual `make backfill` step. Full mode + feature reference: **[docs/sim-config.md](docs/sim-config.md)**.
 
 | Feature | What it adds |
 |---------|--------------|
+| `continuity` | Walk each value from the last reading instead of re-drawing the whole band — real vars drift smoothly, `jitter=0` counters hold instead of flickering |
 | `correlation` | When one param degrades, bias correlated params toward degrading too (e.g. a stalled fan drives CPU temperature up), per host |
 | `trend` | Ramp gradually from the last value into the new band over `ramp_seconds` instead of stepping — realistic wear curves |
 | `time_of_day` | Scale a value by a peak/off-peak multiplier by local hour (shift-hour load) |
 | `dropout` | Occasionally skip a due send so Zabbix `nodata()` triggers get exercised |
 | `backfill` | `make backfill` generates days/weeks of backdated history with correct timestamps in one run |
 
-`make check` validates this file against the catalog (unknown param key, bad
+`make check` validates the active file against the catalog (unknown param key, bad
 band, or out-of-range number fails loudly before you touch Zabbix). Flip a flag,
 re-run `make simulate` (or `make backfill`), and the feature is live.
 
@@ -128,14 +153,17 @@ Then `make provision`. To remove a station, delete its line and re-provision
 run (so graphs and trends have depth immediately):
 
 ```bash
+make config MODE=realistic      # pick a mode first — backfill replays it
 make provision                  # items/hosts must exist first
-make backfill                   # uses days/speed_multiplier from catalog/sim_config.yml
+make backfill                   # uses days/speed from the active mode's sim_config.yml
 make backfill DAYS=7 SPEED=2000 # or override per run
 ```
 
 It sweeps the same state machine from `now − DAYS` to `now`, sending each value
-with its real historical timestamp. `SPEED` is how much faster than real time to
-generate — higher finishes sooner (wall time ≈ `DAYS × 86400 / SPEED` seconds).
+with its real historical timestamp, **applying the active mode's realism** (continuity,
+cascades, ramps, daily cycles) so the backfilled history matches the live stream.
+`SPEED` is how much faster than real time to generate — higher finishes sooner (wall
+time ≈ `DAYS × 86400 / SPEED` seconds).
 
 ## 7. Troubleshooting
 

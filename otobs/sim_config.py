@@ -32,6 +32,23 @@ def _num(d: dict, key: str, default, where: str,
 
 
 @dataclass
+class Continuity:
+    """Value continuity: step from the last reading instead of redrawing the whole
+    band each tick. jitter is the step size; jitter=0 params (counters) hold still.
+
+    reversion models closed-loop (PID) control: an analog signal is pulled back
+    toward its setpoint (band centre, shifted by any time_of_day multiplier) each
+    tick instead of drifting to a band edge. 0 = free random walk; ~0.1 = a real
+    controlled process variable hovering at setpoint."""
+    enabled: bool = False
+    step_scale: float = 1.0
+    reversion: float = 0.0
+
+    def step(self, jitter: float) -> float:
+        return jitter * self.step_scale
+
+
+@dataclass
 class Affect:
     param: str
     bias_band: str
@@ -108,6 +125,7 @@ class Backfill:
 
 @dataclass
 class SimConfig:
+    continuity: Continuity = field(default_factory=Continuity)
     correlation: Correlation = field(default_factory=Correlation)
     trend: Trend = field(default_factory=Trend)
     time_of_day: TimeOfDay = field(default_factory=TimeOfDay)
@@ -115,10 +133,16 @@ class SimConfig:
     backfill: Backfill = field(default_factory=Backfill)
 
     def enabled_features(self) -> list[str]:
-        pairs = (("correlation", self.correlation), ("trend", self.trend),
-                 ("time_of_day", self.time_of_day), ("dropout", self.dropout),
-                 ("backfill", self.backfill))
+        pairs = (("continuity", self.continuity), ("correlation", self.correlation),
+                 ("trend", self.trend), ("time_of_day", self.time_of_day),
+                 ("dropout", self.dropout), ("backfill", self.backfill))
         return [name for name, f in pairs if f.enabled]
+
+
+def _continuity(raw: dict) -> Continuity:
+    return Continuity(bool(raw.get("enabled", False)),
+                      _num(raw, "step_scale", 1.0, "continuity", 0.0),
+                      _num(raw, "reversion", 0.0, "continuity", 0.0, 1.0))
 
 
 def _corr(raw: dict) -> Correlation:
@@ -182,19 +206,27 @@ def _backfill(raw: dict) -> Backfill:
                     _num(raw, "speed_multiplier", 500.0, "backfill", 0.001))
 
 
-def load_sim_config(directory: Path | None = None) -> SimConfig:
-    """Parse sim_config.yml into typed objects. Absent file -> all features off."""
-    f = (directory or CATALOG_DIR) / SIM_CONFIG_FILE
-    if not f.exists():
-        return SimConfig()
-    raw = yaml.safe_load(f.read_text()) or {}
+def _parse(raw: dict) -> SimConfig:
     return SimConfig(
+        continuity=_continuity(raw.get("continuity") or {}),
         correlation=_corr(raw.get("correlation") or {}),
         trend=_trend(raw.get("trend") or {}),
         time_of_day=_tod(raw.get("time_of_day") or {}),
         dropout=_dropout(raw.get("dropout") or {}),
         backfill=_backfill(raw.get("backfill") or {}),
     )
+
+
+def load_sim_config_file(path: Path) -> SimConfig:
+    """Parse one sim-config YAML (any name). Absent file -> all features off."""
+    if not path.exists():
+        return SimConfig()
+    return _parse(yaml.safe_load(path.read_text()) or {})
+
+
+def load_sim_config(directory: Path | None = None) -> SimConfig:
+    """The active config: catalog/sim_config.yml (whatever `make config` last put there)."""
+    return load_sim_config_file((directory or CATALOG_DIR) / SIM_CONFIG_FILE)
 
 
 def validate(cfg: SimConfig, param_bands: dict[str, set]) -> None:

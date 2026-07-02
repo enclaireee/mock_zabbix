@@ -1,0 +1,10 @@
+# preset: baseline — the pure sticky state machine, every realism feature OFF.
+# Output is byte-for-byte identical to having no sim_config.yml at all: each tick
+# re-draws uniformly inside the current band. Use this to reset to the reference
+# behavior, or as the control when comparing against another mode.
+continuity:  { enabled: false }
+correlation: { enabled: false }
+trend:       { enabled: false }
+time_of_day: { enabled: false }
+dropout:     { enabled: false }
+backfill:    { enabled: false, days: 7, speed_multiplier: 1000 }

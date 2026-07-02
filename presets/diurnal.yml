@@ -1,0 +1,32 @@
+# preset: diurnal — showcase daily / shift-hour operational cycles.
+# Time-of-day multipliers are turned up and applied to every demand-linked param,
+# and continuity is on with strong reversion so each value visibly TRACKS its
+# shifting setpoint (morning ramp-up, overnight lull) instead of just wandering.
+# Correlation is off so the cycles are the whole story. Backfill several days to
+# see the waveform repeat.
+#   make config MODE=diurnal && make check && make backfill DAYS=14 && make simulate
+
+continuity:
+  enabled: true
+  step_scale: 0.6
+  reversion: 0.2         # tracks the moving setpoint closely
+
+time_of_day:
+  enabled: true
+  profiles:
+    # Throughput chain rises through the working day, lulls overnight (lowest ~05:00).
+    - { param: "proc.flow.rate",             peak_hours: [6, 22], peak_multiplier: 1.20, off_peak_multiplier: 0.80 }
+    - { param: "proc.comp.speed",            peak_hours: [6, 22], peak_multiplier: 1.12, off_peak_multiplier: 0.90 }
+    - { param: "proc.comp.discharge_pressure", peak_hours: [6, 22], peak_multiplier: 1.06, off_peak_multiplier: 0.96 }
+    # Operator activity follows the day shift.
+    - { param: "hmi.cpu.util",               peak_hours: [7, 19], peak_multiplier: 1.40, off_peak_multiplier: 0.60 }
+    - { param: "hmi.mem.available",          peak_hours: [7, 19], peak_multiplier: 0.85, off_peak_multiplier: 1.10 }
+
+correlation: { enabled: false }
+
+trend:
+  enabled: true
+  ramp_seconds: 1800
+
+dropout:  { enabled: false }
+backfill: { enabled: false, days: 14, speed_multiplier: 800 }

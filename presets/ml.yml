@@ -1,0 +1,59 @@
+# preset: ml — training data for Tahap 2/3 (clustering, RUL / predictive maintenance).
+# Optimised for LONG, SMOOTH, LABELLED degradation curves and complete history:
+#   - continuity + long trend ramps  => gradual slopes an RUL model can learn from
+#   - correlation                    => real causal structure to discover
+#   - NO dropout                     => no gaps in the training set
+#
+# Pair with a high SIM_STICKINESS in .env (e.g. 0.97) so runs stay in a band long
+# enough to trace a full curve. Generate the dataset (a deliberate, manual step):
+#   make config MODE=ml && make check && make backfill DAYS=30
+
+continuity:
+  enabled: true
+  step_scale: 0.4          # gentle walk = clean curves, minimal sensor-noise chatter
+  reversion: 0.08          # mild control — settles but still explores the band
+
+# The full causal web, so the structure a model should discover is actually present.
+correlation:
+  enabled: true
+  groups:
+    - name: "lube_starvation"
+      trigger: { param: "proc.comp.lube_oil_pressure", band: "failed" }
+      affects:
+        - { param: "proc.comp.bearing_temp", bias_band: "failed",       strength: 0.7 }
+        - { param: "proc.comp.vibration",    bias_band: "underperform", strength: 0.5 }
+    - name: "filter_choke"
+      trigger: { param: "proc.dp.filter", band: "failed" }
+      affects:
+        - { param: "proc.flow.rate", bias_band: "underperform", strength: 0.6 }
+    - name: "supply_loss"
+      trigger: { param: "proc.pressure.inlet", band: "failed" }
+      affects:
+        - { param: "proc.flow.rate",             bias_band: "underperform", strength: 0.6 }
+        - { param: "proc.comp.suction_pressure", bias_band: "underperform", strength: 0.6 }
+    - name: "thermal_cascade"
+      trigger: { param: "hmi.fan.rpm", band: "failed" }
+      affects:
+        - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 0.7 }
+    - name: "paging_storm"
+      trigger: { param: "hmi.mem.available", band: "failed" }
+      affects:
+        - { param: "hmi.cpu.util", bias_band: "underperform", strength: 0.6 }
+
+# Long ramps everywhere -> smooth degradation slopes rather than steps.
+trend:
+  enabled: true
+  ramp_seconds: 7200
+  overrides:
+    hmi.cpu.temp:              { ramp_seconds: 10800 }
+    proc.comp.bearing_temp:    { ramp_seconds: 10800 }
+    hmi.smart.realloc_sectors: { ramp_seconds: 21600 }
+
+dropout:     { enabled: false }   # complete data for training
+time_of_day: { enabled: false }
+
+# Backfill parameters for the dataset sweep (run `make backfill` yourself).
+backfill:
+  enabled: false
+  days: 30
+  speed_multiplier: 2000

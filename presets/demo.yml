@@ -1,0 +1,40 @@
+# preset: demo — punchy and fast, for a 5-minute live walkthrough.
+# Cascades fire hard and ramps are short, so a fault visibly drags its neighbours
+# within a minute or two of watching. Continuity keeps the lines smooth on screen.
+# Pair with a LOWER SIM_STICKINESS in .env (≈0.85) so things actually happen while
+# you're presenting. Backfill just one day so graphs aren't empty.
+#   make config MODE=demo && make check && make backfill DAYS=1 SPEED=2000 && make simulate
+
+continuity:
+  enabled: true
+  step_scale: 1.0
+  reversion: 0.1
+
+# A few strong, easy-to-narrate chains (high strength so the effect is obvious).
+correlation:
+  enabled: true
+  groups:
+    - name: "thermal_cascade"          # "watch the CPU heat up as the fan dies"
+      trigger: { param: "hmi.fan.rpm", band: "failed" }
+      affects:
+        - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 1.0 }
+    - name: "lube_starvation"          # "lose lube oil, the bearing cooks, the rotor shakes"
+      trigger: { param: "proc.comp.lube_oil_pressure", band: "failed" }
+      affects:
+        - { param: "proc.comp.bearing_temp", bias_band: "failed",       strength: 1.0 }
+        - { param: "proc.comp.vibration",    bias_band: "underperform", strength: 0.9 }
+    - name: "supply_loss"              # "inlet drops, flow follows it down"
+      trigger: { param: "proc.pressure.inlet", band: "failed" }
+      affects:
+        - { param: "proc.flow.rate", bias_band: "underperform", strength: 1.0 }
+
+trend:
+  enabled: true
+  ramp_seconds: 180        # ramps visible within the demo
+
+dropout:
+  enabled: true
+  probability: 0.03
+
+time_of_day: { enabled: false }
+backfill:    { enabled: false, days: 1, speed_multiplier: 2000 }
