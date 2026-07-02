@@ -30,10 +30,13 @@ provision: venv ## Create host groups, templates, hosts, items, triggers from ca
 simulate: venv ## Stream Good/Underperform/Failed mock data into Zabbix (Ctrl+C to stop)
 	$(PY) -m otobs simulate
 
+backfill: venv ## Backfill historical data (override DAYS=/SPEED=; else catalog/sim_config.yml)
+	$(PY) -m otobs backfill $(if $(DAYS),--days $(DAYS)) $(if $(SPEED),--speed $(SPEED))
+
 list: venv ## Print the parsed catalog (sanity view)
 	$(PY) -m otobs list
 
 check: venv ## Run the self-check (catalog + generator), no Zabbix needed
 	$(PY) -m otobs check
 
-.PHONY: help venv up down clean logs provision simulate list check
+.PHONY: help venv up down clean logs provision simulate backfill list check

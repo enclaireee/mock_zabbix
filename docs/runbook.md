@@ -20,9 +20,10 @@ Frontend: http://localhost:8080 — `Admin` / `zabbix`.
 | Start / stop stack (keep data) | `make up` / `make down` |
 | Wipe everything (DB volume) | `make clean` |
 | Re-apply catalog changes | `make provision` |
-| Stream mock data | `make simulate` |
-| Inspect parsed catalog | `make list` |
-| Offline sanity test | `make check` |
+| Stream mock data (live) | `make simulate` |
+| Backfill past history | `make backfill` (`DAYS=7 SPEED=2000` to tune) |
+| Inspect parsed catalog + sim-config | `make list` |
+| Offline sanity test (catalog + sim-config) | `make check` |
 | Tail server logs | `make logs` |
 
 ## Where to look in the UI
@@ -42,10 +43,36 @@ Frontend: http://localhost:8080 — `Admin` / `zabbix`.
 
 ## Tuning the simulation
 
-Edit `.env`:
+Global scalars in `.env`:
 
 - `SIM_STICKINESS` (0–1): higher = longer Good/Underperform/Failed stretches.
 - `SIM_TIME_SCALE`: 1.0 = real catalog intervals; 10.0 = 10× faster demo.
+
+Structured, per-parameter realism in `catalog/sim_config.yml` (each feature has
+its own `enabled` flag, all **off** by default — off ⇒ identical to the plain
+state machine). Validated by `make check`. See
+[docs/sim-states.md](sim-states.md) for the schema:
+
+- `correlation` — one degrading param biases correlated params (fan → CPU temp).
+- `trend` — ramp into a new band over `ramp_seconds`, not a step.
+- `time_of_day` — peak/off-peak multiplier by local hour.
+- `dropout` — occasional missed reading, to exercise `nodata()` triggers.
+- `backfill` — used by `make backfill`; see below.
+
+## Backfilling history
+
+`make simulate` only builds history going forward. To populate the past in one
+run (so graphs and trends have depth immediately):
+
+```bash
+make provision                 # items/hosts must exist first
+make backfill                  # uses days/speed_multiplier from sim_config.yml
+make backfill DAYS=7 SPEED=2000 # or override per run
+```
+
+It sweeps the same state machine from `now − DAYS` to `now`, sending each value
+with its real historical timestamp. `SPEED` is how much faster than real time to
+generate — higher finishes sooner (wall time ≈ `DAYS × 86400 / SPEED` seconds).
 
 ## Troubleshooting
 

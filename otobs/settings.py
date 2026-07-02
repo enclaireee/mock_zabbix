@@ -37,5 +37,8 @@ API_PASSWORD = os.environ.get("ZBX_API_PASSWORD", "zabbix")
 SENDER_HOST = os.environ.get("ZBX_SENDER_HOST", "127.0.0.1")
 SENDER_PORT = int(os.environ.get("ZBX_SENDER_PORT", "10051"))
 
-STICKINESS = _f("SIM_STICKINESS", 0.30)
-TIME_SCALE = _f("SIM_TIME_SCALE", 1000.0)
+STICKINESS = _f("SIM_STICKINESS", 0.92)
+TIME_SCALE = _f("SIM_TIME_SCALE", 10.0)
+
+# Local timezone for the time_of_day sim feature (reuses the stack's tz var).
+TIMEZONE = os.environ.get("ZBX_TIMEZONE", "UTC")

@@ -47,6 +47,7 @@ make up           # start Zabbix: db, server, web, agent (docker compose up -d)
                   # first boot imports the DB schema — wait ~30-60s
 make provision    # create host groups, templates, items, triggers, hosts (idempotent)
 make simulate     # stream Good/Underperform/Failed mock data (Ctrl+C to stop)
+make backfill     # optional: populate historical data so graphs aren't empty
 ```
 
 Open **http://localhost:8080** → login **`Admin` / `zabbix`**:
@@ -71,9 +72,10 @@ Open **http://localhost:8080** → login **`Admin` / `zabbix`**:
 | `make clean` | Stop the stack and **delete** the DB volume (full reset) |
 | `make logs` | Tail the Zabbix server logs |
 | `make provision` | Apply the catalog to Zabbix (idempotent — re-run after edits) |
-| `make simulate` | Stream mock telemetry via Trapper |
-| `make list` | Print the parsed catalog (sanity view) |
-| `make check` | Offline self-test (catalog + generator), **no Zabbix needed** |
+| `make simulate` | Stream mock telemetry via Trapper (live, forward in time) |
+| `make backfill` | Generate backdated history in one shot (`DAYS=` / `SPEED=` to tune) |
+| `make list` | Print the parsed catalog + which sim-config features are on |
+| `make check` | Offline self-test (catalog + generator + sim-config), **no Zabbix needed** |
 
 ## 5. Configuration
 
@@ -94,6 +96,27 @@ and the Python tooling read it. Real environment variables override `.env`.
 
 > If you change `ZBX_WEB_PORT`, update `ZBX_API_URL` to match. If you change
 > `ZBX_TRAPPER_PORT`, update `ZBX_SENDER_PORT` to match.
+
+`SIM_STICKINESS` / `SIM_TIME_SCALE` are global scalars. Richer, structured
+realism knobs live in a separate file — see below.
+
+### Realism layer — [`catalog/sim_config.yml`](catalog/sim_config.yml)
+
+An optional layer on top of the per-parameter bands. Five features, **each with
+its own `enabled` flag and off by default** — with the file absent or everything
+`false`, the simulator behaves exactly as the plain state machine does.
+
+| Feature | What it adds |
+|---------|--------------|
+| `correlation` | When one param degrades, bias correlated params toward degrading too (e.g. a stalled fan drives CPU temperature up), per host |
+| `trend` | Ramp gradually from the last value into the new band over `ramp_seconds` instead of stepping — realistic wear curves |
+| `time_of_day` | Scale a value by a peak/off-peak multiplier by local hour (shift-hour load) |
+| `dropout` | Occasionally skip a due send so Zabbix `nodata()` triggers get exercised |
+| `backfill` | `make backfill` generates days/weeks of backdated history with correct timestamps in one run |
+
+`make check` validates this file against the catalog (unknown param key, bad
+band, or out-of-range number fails loudly before you touch Zabbix). Flip a flag,
+re-run `make simulate` (or `make backfill`), and the feature is live.
 
 ### Adding a station (more host rows)
 
@@ -135,12 +158,14 @@ changing the item type (Trapper → Agent/SNMP) on the template.
 
 ```
 catalog/            asset-class definitions (the source of truth) + schema docs
+  └─ sim_config.yml optional realism layer (correlation/trend/time-of-day/dropout/backfill)
 otobs/              python package
   ├─ catalog.py     load + validate catalog/*.yml into typed objects
   ├─ provision.py   Zabbix API: templates, items, triggers, hosts (idempotent)
-  ├─ simulate.py    sticky Good/Underperform/Failed state machine → Trapper
+  ├─ simulate.py    sticky Good/Underperform/Failed state machine → Trapper (+ backfill)
+  ├─ sim_config.py  load + validate sim_config.yml into typed objects
   ├─ settings.py    reads .env
-  └─ __main__.py    CLI: provision | simulate | list | check
+  └─ __main__.py    CLI: provision | simulate | backfill | list | check
 docs/               architecture.md (OT mapping) + runbook.md (operations)
 docker-compose.yml  the real Zabbix 7.0 stack
 .env / .env.example central variables

@@ -1,0 +1,55 @@
+# =============================================================================
+# Simulation realism layer (orthogonal to the per-parameter `sim:` bands/weights
+# in the other catalog/*.yml). Five features, each with its own `enabled` flag.
+#
+# EVERY feature is a strict no-op when disabled — with all four/five off (or this
+# file absent), `make simulate` produces exactly the same distribution/behavior
+# as before. Flip a flag to opt in. `make check` validates every param key and
+# band referenced here against the real catalog.
+# =============================================================================
+
+# When X degrades, bias correlated params toward degrading too (per host).
+correlation:
+  enabled: false
+  groups:
+    - name: "thermal_cascade"
+      # A stalled chassis fan drives CPU temperature up.
+      trigger: { param: "hmi.fan.rpm", band: "failed" }
+      affects:
+        # strength = P(force this param toward bias_band on a tick where the
+        # trigger param is currently in trigger.band), instead of its own weights.
+        - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 0.7 }
+
+# Ramp from the last value toward a target in the new band over ramp_seconds
+# (respects SIM_TIME_SCALE like intervals do), with jitter on top — no step.
+trend:
+  enabled: false
+  ramp_seconds: 1800
+  overrides:
+    hmi.cpu.temp: { ramp_seconds: 3600 }
+
+# Scale the sampled value by an operational-cycle multiplier before jitter,
+# by local hour (settings.TIMEZONE).
+time_of_day:
+  enabled: false
+  profiles:
+    - param: "hmi.cpu.util"
+      peak_hours: [8, 17]        # 08:00–17:00 local = shift hours
+      peak_multiplier: 1.4
+      off_peak_multiplier: 0.6
+
+# Occasionally skip a due send (network hiccup / agent restart) so Zabbix
+# nodata()-based triggers get exercised. A drop is a missed reading, not a retry.
+dropout:
+  enabled: false
+  probability: 0.02
+  overrides:
+    hmi.nic.errors: { probability: 0.0 }   # keep this one gap-free
+
+# `make backfill` sweeps the state machine from now-`days` to now, sending each
+# value with its historical `clock`. speed_multiplier = how much faster than real
+# time to generate (higher = quicker; override per-run with SPEED=/DAYS=).
+backfill:
+  enabled: false
+  days: 14
+  speed_multiplier: 500

@@ -62,5 +62,25 @@ Each parameter is a sticky state machine over three bands:
 
 `SIM_STICKINESS` (0.92) controls how long a parameter dwells in a state;
 `SIM_TIME_SCALE` (default 10×) compresses the catalog intervals so a 1h SMART
-metric updates every ~6 minutes in the lab. Both live in `.env` — the
+metric updates every ~6 minutes in the lab. Both live in `.env` — the global
 calibration knobs for the mock plant.
+
+## Realism layer — `catalog/sim_config.yml`
+
+The bare state machine is independent, memoryless-within-a-band, and always-on.
+An optional layer (`otobs/sim_config.py` → `catalog/sim_config.yml`) makes it
+look more like real telemetry, **each feature independently toggleable and off by
+default** (file absent or all `enabled: false` ⇒ identical to the plain machine):
+
+| Feature | Effect on the data plane |
+|---|---|
+| `correlation` | Per host, when a trigger param is in a given band it biases correlated params' next state toward degrading (stalled fan → rising CPU temp). |
+| `trend` | On a state change, ramps from the last value toward a target inside the new band over `ramp_seconds` (respecting `SIM_TIME_SCALE`) — a curve, not a step. |
+| `time_of_day` | Scales a value by a peak/off-peak multiplier by local hour (`settings.TIMEZONE`) — operational cycles. |
+| `dropout` | Skips a due send with some probability, leaving a genuine gap so `nodata()` triggers fire. |
+| `backfill` | `otobs.backfill` mode sweeps the state machine from `now − days` to `now` and pushes each value with its historical `clock`, so graphs have depth immediately. |
+
+This is a **data-plane** change only: the config plane (items, triggers,
+templates) is untouched, so the production swap-in story is unaffected. `make
+check` validates the file against the catalog. See `docs/sim-states.md` and the
+walkthrough for the schema and semantics.

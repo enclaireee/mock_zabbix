@@ -4,6 +4,12 @@ Each `*.yml` in this directory defines one **asset class**. It is the single
 source of truth consumed by `otobs.provision` (Zabbix config) and
 `otobs.simulate` (mock data).
 
+> Two files here are **not** asset classes and are loaded separately:
+> `sites.yml` (the station registry, below) and `sim_config.yml` (the optional
+> simulation realism layer — correlation, trend, time-of-day, dropout, backfill;
+> see [docs/sim-states.md](../docs/sim-states.md)). `sim_config.yml` is orthogonal
+> to the per-parameter `sim:` block described below and does not replace it.
+
 ## Station registry (`sites.yml`)
 
 Physical stations are defined **once** in `sites.yml`; each asset class generates

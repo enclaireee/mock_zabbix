@@ -232,7 +232,8 @@ def load_file(path: Path, sites: list[dict] | None = None) -> AssetClass:
 def load_all(directory: Path | None = None) -> list[AssetClass]:
     directory = directory or CATALOG_DIR
     sites = load_sites(directory)
-    files = sorted(p for p in directory.glob("*.yml") if p.name != "sites.yml")
+    files = sorted(p for p in directory.glob("*.yml")
+                   if p.name not in ("sites.yml", "sim_config.yml"))
     if not files:
         raise ValueError(f"no catalog *.yml in {directory}")
     return [load_file(p, sites) for p in files]

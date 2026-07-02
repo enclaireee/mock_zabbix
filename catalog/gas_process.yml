@@ -40,6 +40,7 @@ parameters:
     triggers:
       - { op: "<=", value: 27, severity: warning, label: "Inlet pressure low" }
       - { op: "<=", value: 20, severity: high,    label: "Inlet pressure LOW-LOW — supply integrity" }
+      # Over-side protection: modeled for production; sim bands stay low-side so this won't fire in the lab.
       - { op: ">=", value: 40, severity: high,    label: "Inlet overpressure — relief valve risk" }
 
   - key: "proc.pressure.outlet"
@@ -61,6 +62,7 @@ parameters:
     triggers:
       - { op: "<=", value: 10, severity: warning, label: "Outlet pressure below setpoint" }
       - { op: "<=", value: 8,  severity: high,    label: "Outlet pressure LOW-LOW — customer supply risk" }
+      # Over-side protection: modeled for production; sim bands stay low-side so this won't fire in the lab.
       - { op: ">=", value: 16, severity: high,    label: "Outlet overpressure — regulator passing" }
 
   - key: "proc.dp.filter"

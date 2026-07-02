@@ -181,7 +181,8 @@ parameters:
     collection: "custom (LibreHardwareMonitor WMI / IPMI OEM)"
     failure_mode: "Capacitor ageing (>5y), unstable facility mains, regulator overload"
     source: "LHM WMI & Dell OMSA, 2021"
-    # ATX spec: ±5% => 11.40–12.60 V good. Two-sided trigger (brownout + overvoltage).
+    # ATX spec: ±5% => 11.40–12.60 V good. Two-sided trigger (brownout + overvoltage);
+    # sim only models the brownout side, so the overvoltage trigger won't fire in the lab.
     sim:
       kind: numeric
       good: [11.7, 12.3]
@@ -192,6 +193,7 @@ parameters:
     triggers:
       - { op: "<=", value: 11.45, severity: warning, label: "+12V near lower ATX margin" }
       - { op: "<=", value: 11.40, severity: high,    label: "+12V brownout — below ATX ±5%" }
+      # Over-side protection: modeled for production; sim bands stay low-side so this won't fire in the lab.
       - { op: ">=", value: 12.60, severity: high,    label: "+12V overvoltage — above ATX ±5%" }
 
   - key: "hmi.cpu.temp"

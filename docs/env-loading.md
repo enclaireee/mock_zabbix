@@ -20,6 +20,12 @@ variable is missing or unparseable.
 
 - **Zabbix API** (`ZBX_API_*`) — used by provisioning.
 - **Trapper sender** (`ZBX_SENDER_*`) — used by simulation.
-- **Simulation tuning** (`SIM_STICKINESS`, `SIM_TIME_SCALE`) — the calibration
-  knobs for the mock plant; see [the architecture doc](architecture.md) for what
-  they control.
+- **Simulation tuning** (`SIM_STICKINESS`, `SIM_TIME_SCALE`) — the global
+  calibration knobs for the mock plant; see [the architecture doc](architecture.md)
+  for what they control.
+- **Timezone** (`TIMEZONE`, from `ZBX_TIMEZONE`) — local hour for the
+  `time_of_day` realism feature.
+
+Structured, per-parameter realism knobs deliberately live **outside** `.env`, in
+[`catalog/sim_config.yml`](../catalog/sim_config.yml) — see
+[sim-states.md](sim-states.md).
