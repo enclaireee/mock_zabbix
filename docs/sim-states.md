@@ -39,3 +39,69 @@ behavior on top. **Every feature defaults off**; with the file absent or all
 
 To support trends, a `Stream` also carries `last_value` and the current ramp
 (`ramp_from` / `ramp_to` / `ramp_start`); these are inert when `trend` is off.
+
+## `sim_config.yml` schema (annotated)
+
+```yaml
+correlation:
+  enabled: false
+  groups:
+    - name: "thermal_cascade"
+      trigger: { param: "hmi.fan.rpm", band: "failed" }   # the cause
+      affects:
+        - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 0.7 }
+      # strength = P(force cpu.temp toward underperform on a tick where fan.rpm is
+      # currently 'failed'), instead of its own weights. Composable: a param can be
+      # an affects-target of several groups.
+
+trend:
+  enabled: false
+  ramp_seconds: 1800          # global ramp length (÷ SIM_TIME_SCALE, like intervals)
+  overrides:
+    hmi.cpu.temp: { ramp_seconds: 3600 }   # slower ramp for this one
+
+time_of_day:
+  enabled: false
+  profiles:
+    - param: "hmi.cpu.util"
+      peak_hours: [8, 17]     # local hours (settings.TIMEZONE); wraps if start > end
+      peak_multiplier: 1.4
+      off_peak_multiplier: 0.6
+
+dropout:
+  enabled: false
+  probability: 0.02           # per-stream, per-due-tick chance of skipping the send
+  overrides:
+    hmi.nic.errors: { probability: 0.0 }   # never drop this one
+
+backfill:
+  enabled: false
+  days: 14
+  speed_multiplier: 500       # how much faster than real time to generate
+```
+
+## Semantics worth knowing
+
+- **Correlation is causal and per-host.** It reads each trigger param's *current*
+  (pre-roll) band, so ordering within a tick doesn't matter, and it only couples
+  streams on the same host. A forced roll overrides both weights *and* stickiness
+  — deliberately, so the effect is visible.
+- **Trend and time-of-day skip the band clamp.** The baseline clamps a sample into
+  `[lo, hi] ± jitter`. A ramp deliberately traverses *between* bands, and a
+  time-of-day multiplier deliberately *shifts* the value — clamping would erase
+  both, so those paths don't clamp.
+- **A dropout is a missed reading, not a retry.** On a drop the state is frozen and
+  nothing is emitted, but `next_due` still advances normally — so a genuine
+  one-interval gap forms (which is what `nodata()` needs), rather than an immediate
+  re-send.
+- **Backfill uses real intervals.** Live `simulate` compresses time by
+  `SIM_TIME_SCALE`; backfill does not — it steps virtual time by each parameter's
+  true interval so the historical `clock` spacing is physically correct.
+
+## Validation
+
+`make check` loads `sim_config.yml` and asserts every referenced param key and
+band actually exists in the catalog, and every number is in range (e.g. negative
+probability, zero ramp, hour > 24 all fail loudly) — **before** any data is sent.
+`make list` and `make check` both print which features are enabled. See
+[RUNNING.md](../RUNNING.md) for the commands.

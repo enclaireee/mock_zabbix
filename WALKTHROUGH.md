@@ -80,16 +80,9 @@ an Indonesia geomap and streaming live.
 
 Every parameter records **how it would really be collected** in production, and
 admits what Zabbix *can't* see natively (the `collection:` field, also embedded
-into the live item description):
-
-- **Switch/router** — all native SNMP (IF-MIB, CISCO-ENVMON-MIB). Trivial.
-- **HMI** — CPU/RAM/disk/SMART/NIC via **Zabbix Agent 2**; fan RPM, PSU rails,
-  CPU temp need middleware (LibreHardwareMonitor over WMI, or iDRAC/iLO/IPMI).
-- **PLC S7-400** — the CP443-1 comms module exposes SNMP but **can't see CPU
-  memory, the diagnostic buffer, or per-channel I/O**; those need **S7comm**
-  (RFC 1006, TCP 102) reading SZL lists. So `plc.cp.icmp_latency` is the only
-  natively-collectable PLC metric; the rest are *needs middleware*.
-- **Gas process** — all SCADA tags need an S7comm → Node-RED → Zabbix bridge.
+into the live item description). Full per-asset breakdown (what's native SNMP/
+Agent vs. what needs an S7comm/WMI bridge, and why the PLC's CP443-1 can't see
+CPU memory over SNMP): [docs/architecture.md](docs/architecture.md).
 
 In the lab, **every value arrives via Zabbix Trapper** (push). That's deliberate:
 the production Node-RED bridge pushes over the same `zabbix_sender` protocol, so
@@ -115,12 +108,9 @@ turns independent coin-flips into **long, smooth runs** — realistic degradatio
 not per-tick noise. (Formally: a Markov chain whose self-transition probability is
 pinned to `STICKINESS`, off-diagonal mass split by the steady-state weights.)
 
-Two **global** knobs, in `.env`:
-
-- `SIM_STICKINESS` (0–1) — higher = longer dwell = smoother curves. Default
-  **0.92** (high on purpose: smooth runs are the ML signal).
-- `SIM_TIME_SCALE` — time compression. `1.0` = real intervals; ships **10.0**, so
-  a `1h` SMART metric updates every ~6 min. (`run()` floors it at `0.001`.)
+Two **global** knobs in `.env` calibrate it — `SIM_STICKINESS` (default **0.92**,
+high on purpose: smooth runs are the ML signal) and `SIM_TIME_SCALE` (default
+**10×**). Full variable reference: [RUNNING.md](RUNNING.md#5-configuration).
 
 That's the baseline. On its own it has four gaps: parameters never influence each
 other, transitions are instant steps, values ignore time of day, and no reading is
@@ -147,90 +137,13 @@ features, **each with its own `enabled` flag and every one off by default.**
 | `dropout` | Data never went missing | Occasionally skips a due send, leaving a real gap so Zabbix `nodata()` triggers finally fire. |
 | `backfill` | History only existed going forward | `make backfill` sweeps the machine over a past window and pushes each value with its historical timestamp. |
 
-### The schema (annotated)
-
-```yaml
-correlation:
-  enabled: false
-  groups:
-    - name: "thermal_cascade"
-      trigger: { param: "hmi.fan.rpm", band: "failed" }   # the cause
-      affects:
-        - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 0.7 }
-      # strength = P(force cpu.temp toward underperform on a tick where fan.rpm is
-      # currently 'failed'), instead of its own weights. Composable: a param can be
-      # an affects-target of several groups.
-
-trend:
-  enabled: false
-  ramp_seconds: 1800          # global ramp length (÷ SIM_TIME_SCALE, like intervals)
-  overrides:
-    hmi.cpu.temp: { ramp_seconds: 3600 }   # slower ramp for this one
-
-time_of_day:
-  enabled: false
-  profiles:
-    - param: "hmi.cpu.util"
-      peak_hours: [8, 17]     # local hours (settings.TIMEZONE); wraps if start > end
-      peak_multiplier: 1.4
-      off_peak_multiplier: 0.6
-
-dropout:
-  enabled: false
-  probability: 0.02           # per-stream, per-due-tick chance of skipping the send
-  overrides:
-    hmi.nic.errors: { probability: 0.0 }   # never drop this one
-
-backfill:
-  enabled: false
-  days: 14
-  speed_multiplier: 500       # how much faster than real time to generate
-```
-
-### Semantics worth knowing (they come up in Q&A)
-
-- **Correlation is causal and per-host.** It reads each trigger param's *current*
-  (pre-roll) band, so ordering within a tick doesn't matter, and it only couples
-  streams on the same host. A forced roll overrides both weights *and* stickiness
-  — deliberately, so the effect is visible.
-- **Trend and time-of-day skip the band clamp.** The baseline clamps a sample into
-  `[lo, hi] ± jitter`. A ramp deliberately traverses *between* bands, and a
-  time-of-day multiplier deliberately *shifts* the value — clamping would erase
-  both, so those paths don't clamp.
-- **A dropout is a missed reading, not a retry.** On a drop the state is frozen and
-  nothing is emitted, but `next_due` still advances normally — so a genuine
-  one-interval gap forms (which is what `nodata()` needs), rather than an immediate
-  re-send.
-- **Backfill uses real intervals.** Live `simulate` compresses time by
-  `SIM_TIME_SCALE`; backfill does not — it steps virtual time by each parameter's
-  true interval so the historical `clock` spacing is physically correct.
-
-### Validation
-
-`make check` loads `sim_config.yml` and asserts every referenced param key and
-band actually exists in the catalog, and every number is in range (e.g. negative
-probability, zero ramp, hour > 24 all fail loudly) — **before** any data is sent.
-`make list` and `make check` both print which features are enabled.
+Full annotated YAML schema, the causal/per-host semantics of each feature (the
+kind of detail that comes up in Q&A), and validation rules:
+[docs/sim-states.md](docs/sim-states.md).
 
 ---
 
 ## 6. Architecture — the moving parts
-
-```
-                     catalog/*.yml  (single source of truth)
-                    /                              \
-          otobs.provision                       otobs.simulate  ── sim_config.yml
-        (Zabbix JSON-RPC API)                 (Trapper / zabbix_sender)   (realism)
-               |                                       |
-               v                                       v
-   ┌───────────────────────────────────────────────────────────────┐
-   │  Zabbix 7.0 stack (docker compose)                             │
-   │   zabbix-web    (nginx, :8080)   ── API + UI                   │
-   │   zabbix-server (:10051 trapper) ── triggers, history          │
-   │   zabbix-db     (postgres 16)    ── config + history store     │
-   │   zabbix-agent2                  ── monitors the lab host       │
-   └───────────────────────────────────────────────────────────────┘
-```
 
 **Two planes** — keep them straight and the system explains itself:
 
@@ -240,11 +153,8 @@ probability, zero ramp, hour > 24 all fail loudly) — **before** any data is se
   `backfill`. **`sim_config.yml` only touches the data plane** — the config plane,
   and therefore the production swap-in story, is untouched.
 
-The Docker stack is **real Zabbix**, not a mock — that's the point.
-`docker-compose.yml` runs four official 7.0 images plus Postgres 16, all wired
-through `.env`, with a DB healthcheck so the server waits for the DB. A named
-volume `zbx_db_data` means `make down` keeps data; only `make clean` (`down -v`)
-wipes it.
+The Docker stack is **real Zabbix**, not a mock — that's the point. Full data-flow
+diagram and container layout: [docs/architecture.md](docs/architecture.md).
 
 ---
 
@@ -280,93 +190,13 @@ wipes it.
 
 ## 8. The schemas
 
-### 8.1 Station registry — `sites.yml`
+Two files, both in `catalog/`: `sites.yml` (the station registry — one line adds
+a station) and an asset-class file per file (top-level metadata + a `parameters`
+list, each with a `sim` block — numeric bands or enum states — and a `triggers`
+list). `component`, `collection`, `failure_mode`, `interval`, `source` are baked
+into the live Zabbix item description, so the running tool documents itself.
 
-Physical stations defined **once**; each asset class generates one host per site.
-Required per site: `code`, `name`, `lat`, `lon`, `location` (validated); plus
-free-form fields referenced by host templates.
-
-```yaml
-sites:
-  - { code: GRS, name: "Grissik", location: "Grissik Gas Plant, ...",
-      lat: "-2.0500", lon: "103.4300", city: "Musi Banyuasin",
-      grade: enterprise, p_out_sp: "16" }
-```
-
-`code` → host-name token; `location`/`lat`/`lon`/`city` → host **inventory** (and
-the geomap pin); `grade`/`p_out_sp`/anything-else → available to `host_template`
-macros. **Adding a station is one line here.**
-
-### 8.2 Asset-class file — top level + parameter
-
-```yaml
-asset_class: "PLC Siemens S7-400"       # human label
-host_group:  "OT/PLC"                    # Zabbix host group
-template_name: "Template OT PLC S7-400"  # template items/triggers live on
-template_group: "Templates/OT"
-host_template:                           # generate one host per site...
-  tech:   "PLC-S7400-{code}"             #   technical name; {field} from the site
-  name:   "{name} — PLC S7-400H"
-  macros: { "{$SITE}": "{code}", "{$RACK}": "0" }
-parameters:
-  - key: "plc.cpu.operating_mode"        # Zabbix item key AND trapper key — the glue
-    name: "CPU Operating Mode"
-    value_type: unsigned                 # float | unsigned | text | char | log
-    units: ""
-    interval: "15s"                      # 15s | 30s | 1m | 5m | 1h ...
-    component: "C. Modules (CPU)"        # FMEA subsystem (baked into the item description)
-    collection: "S7comm via Node-RED (SZL 0x0424, byte 11)"   # real-world method
-    failure_mode: "Hardware defect, watchdog timeout, ..."
-    source: "Siemens OPC SZL Diagnostics, 2024"
-    sim:      { ... }                    # how the simulator generates values
-    triggers: [ ... ]                    # Good/Underperform/Failed alerting
-```
-
-`component`, `collection`, `failure_mode`, `interval`, `source` are **baked into
-the Zabbix item description** (`Parameter.description()`) — the running tool
-documents itself. Instead of `host_template` you may hand-list `hosts:` for
-one-off hosts; one of the two is required.
-
-### 8.3 `sim` — two kinds
-
-**numeric** — three bands; the baseline samples uniformly in the current band plus
-jitter:
-
-```yaml
-sim:
-  kind: numeric
-  good: [40, 60]
-  underperform: [66, 84]
-  failed: [86, 99]
-  weights: [good, underperform, failed]   # tokens → default probs, or raw numbers
-  jitter: 1.5
-```
-
-**enum** — discrete states, each a fixed value with a band weight:
-
-```yaml
-sim:
-  kind: enum
-  states:
-    - { value: 8,  weight: good,         label: "RUN (0x08)" }
-    - { value: 6,  weight: underperform, label: "START-UP (0x06)" }
-    - { value: 13, weight: failed,       label: "DEFECT (0x0D)" }
-```
-
-`weight` is a number or one of `good`/`underperform`/`failed` (0.90/0.08/0.02),
-normalized per parameter. **This block is unchanged by the realism layer** —
-`sim_config.yml` is orthogonal to it (§5).
-
-### 8.4 `triggers`
-
-```yaml
-triggers:
-  - { op: "=",  value: 6,  severity: warning, label: "CPU not in RUN" }
-  - { op: ">=", value: 13, severity: high,    label: "CPU STOP/DEFECT" }
-```
-
-`op` ∈ `= <> > >= < <=`; `severity` ∈ `info|warning|average|high|disaster`; `func`
-optional (default `last`). Expression: `func(/<template_name>/<key>) <op> <value>`.
+Full annotated schema with field-by-field meaning: **[catalog/README.md](catalog/README.md)**.
 
 ---
 
@@ -377,10 +207,9 @@ stdlib `zoneinfo` for the time-of-day clock. No web framework, no ORM.
 
 ### 9.1 `settings.py` — config loader
 
-Hand-rolled `.env` parser (`_load_env`) using `os.environ.setdefault` so **real
-env vars win over `.env`**; `_f()` gives float-with-fallback for the sim knobs.
-Exposes `API_*`, `SENDER_*`, `STICKINESS`, `TIME_SCALE`, and now **`TIMEZONE`**
-(reuses `ZBX_TIMEZONE`, used by the time-of-day feature).
+Hand-rolled `.env` parser exposing `API_*`, `SENDER_*`, `STICKINESS`,
+`TIME_SCALE`, `TIMEZONE`. Parsing rules and precedence:
+[docs/env-loading.md](docs/env-loading.md).
 
 ### 9.2 `catalog.py` — load + validate (the heart)
 
@@ -410,11 +239,9 @@ invariant *and* the RNG-draw order behind it.
 
 ### 9.4 `provision.py` — config-as-code (unchanged)
 
-A `Provisioner` class, fully **idempotent** via get-or-create: `_templategroup` /
-`_hostgroup` / `_template` / `_item` / `_triggers` / `_host` each fetch-or-create;
-`apply()` fetches existing items/triggers/hosts **once per template** (avoids the
-N+1 explosion); `prune()` deletes catalog-managed hosts no longer present, scoped
-to the catalog's own host groups so it never touches unrelated hosts.
+A `Provisioner` class, fully **idempotent**. Get-or-create mechanics, the
+once-per-template fetch that avoids an N+1 API-call storm, and `prune()`'s
+scoping: [docs/provisioning-idempotency.md](docs/provisioning-idempotency.md).
 **The realism layer does not touch this file** — it's a data-plane change.
 
 ### 9.5 `simulate.py` — the mock plant

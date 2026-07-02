@@ -24,6 +24,12 @@
 protocol — exactly the push path the report recommends for a Node-RED bridge
 (`node-red-contrib-zabbix-sender`).
 
+The Docker stack is **real Zabbix**, not a mock. `docker-compose.yml` runs the
+four official 7.0 images above plus Postgres 16, wired through `.env`, with a
+DB healthcheck so the server waits for the DB. A named volume `zbx_db_data`
+means `make down` keeps data; only `make clean` (`down -v`) wipes it. Install
+and run commands: [RUNNING.md](../RUNNING.md).
+
 ## Mapping to the real OT architecture
 
 The simulator is a stand-in. In production each item's `collection` field names
@@ -39,6 +45,19 @@ the real collector:
 Because the **config plane is identical**, swapping a mock for a real collector
 is just changing the item type (Trapper → Agent/SNMP) on the template — the
 keys, triggers, and dashboards stay put.
+
+### Collectability per asset class
+
+The catalog is honest about collectability (per the report's "technical
+honesty"): each parameter records its real-world `collection` method (baked
+into the live Zabbix item description).
+
+| Asset | Native in Zabbix | Needs middleware |
+|-------|------------------|------------------|
+| Gas Process (SCADA) | — | all process tags (pressure, flow, gas quality, valves, F&G, compressor) — **S7comm via Node-RED**, the same tags the HMI reads off the PLC |
+| PLC S7-400 | CP reachability (SNMP/ICMP) | CPU mode, diag buffer, I/O channels, rack — **S7comm via Node-RED** |
+| Workstation/HMI | CPU/RAM/disk/SMART/NIC (Agent 2) | fan RPM, PSU rails, CPU temp — **LibreHardwareMonitor WMI / iDRAC/iLO** |
+| Switch/Router | everything (SNMP IF-MIB / ENVMON-MIB) | — |
 
 ### Why CPU data isn't SNMP
 
@@ -82,5 +101,5 @@ default** (file absent or all `enabled: false` ⇒ identical to the plain machin
 
 This is a **data-plane** change only: the config plane (items, triggers,
 templates) is untouched, so the production swap-in story is unaffected. `make
-check` validates the file against the catalog. See `docs/sim-states.md` and the
-walkthrough for the schema and semantics.
+check` validates the file against the catalog. Full schema and semantics:
+[sim-states.md](sim-states.md).

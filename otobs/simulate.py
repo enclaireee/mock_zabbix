@@ -209,11 +209,35 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
         time.sleep(0.5)
 
 
+def _fmt_eta(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def _print_progress(frac: float, eta_s: float, sent: int) -> None:
+    """Single self-overwriting line, like a download bar -- never scrolls."""
+    bar_w = 24
+    filled = int(bar_w * frac)
+    bar = "#" * filled + "-" * (bar_w - filled)
+    eta = _fmt_eta(eta_s) if frac > 0 else "--:--"
+    print(f"\r[{bar}] {frac * 100:5.1f}%  eta {eta}  sent={sent:,}\x1b[K", end="", flush=True)
+
+
 def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
                  days: float | None = None, speed: float | None = None) -> None:
     """Discrete-event sweep of the same state machine from now-`days` to now,
     sending each value with its historical `clock`. Intervals are real (no
     TIME_SCALE) so timestamps are physically correct; `speed` compresses wall time.
+
+    Streams are scheduled by interval bucket, not one-by-one: every stream on
+    the same interval_s was armed at the same `start` and so is due at the
+    same tick for the entire run -- catalogs are typically a handful of
+    distinct intervals (5s/30s/1m/...) shared by many streams. Checking one
+    due-time per bucket instead of per stream turns an O(n_streams) scan into
+    O(n_intervals); degrades to the old per-stream cost only if every stream
+    has a unique interval, never worse.
     """
     from zabbix_utils import ItemValue, Sender
 
@@ -225,14 +249,21 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     sender = Sender(server=settings.SENDER_HOST, port=settings.SENDER_PORT)
 
     end = time.time()
-    vt = end - days * 86400.0
+    start = end - days * 86400.0
+    span = max(end - start, 1e-9)
+
+    groups: dict[int, list[Stream]] = {}
     for s in streams:
-        s.next_due = vt
+        s.next_due = start
+        groups.setdefault(s.param.interval_s, []).append(s)
+    group_due = {iv: start for iv in groups}
+
     print(f"Backfilling {days:g}d for {len(streams)} items at {speed:g}x "
           f"-> {settings.SENDER_HOST}:{settings.SENDER_PORT} ...")
 
     FLUSH = 500  # ponytail: fixed batch size; raise if the trapper backpressures.
     batch, sent = [], 0
+    wall_start = last_print = time.time()
 
     def flush():
         nonlocal sent
@@ -245,24 +276,37 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
             print(f"send error: {e}")
         batch.clear()
 
-    while vt < end:
+    vt = start
+    while group_due and vt < end:
         hour = _hour(vt) if cfg.time_of_day.enabled else 0
         forced = correlation_forces(cfg, by_host)
-        for s in streams:
-            if s.next_due > vt:
+        for iv, due_t in group_due.items():
+            if due_t > vt:
                 continue
-            s.next_due += s.param.interval_s  # real interval -> correct historical spacing
-            value = process_stream(s, vt, 1.0, cfg, forced, hour)
-            if value is None:
-                continue
-            batch.append(ItemValue(s.host, s.param.key, str(value), clock=int(vt)))
-            if len(batch) >= FLUSH:
-                flush()
+            new_due = due_t + iv  # real interval -> correct historical spacing
+            group_due[iv] = new_due
+            for s in groups[iv]:
+                s.next_due = new_due
+                value = process_stream(s, vt, 1.0, cfg, forced, hour)
+                if value is not None:
+                    batch.append(ItemValue(s.host, s.param.key, str(value), clock=int(vt)))
+                    if len(batch) >= FLUSH:
+                        flush()
+
         prev = vt
-        vt = min(s.next_due for s in streams)  # ponytail: O(n) per event, fine for ~100s of streams
+        vt = min(group_due.values())  # next tick -- also drives the while-check above
+        now = time.time()
+        if now - last_print >= 0.2 or vt >= end:  # throttled: no terminal spam
+            frac = min((prev - start) / span, 1.0)
+            eta = (now - wall_start) * (1 - frac) / frac if frac > 0 else 0.0
+            _print_progress(frac, eta, sent)
+            last_print = now
         time.sleep(min((vt - prev) / speed, 5.0))
+
     flush()
-    day = datetime.fromtimestamp(end - days * 86400.0, _TZ).date()
+    _print_progress(1.0, 0.0, sent)
+    print()
+    day = datetime.fromtimestamp(start, _TZ).date()
     print(f"Backfill done: {sent} points from {day} to now.")
 
 

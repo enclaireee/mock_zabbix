@@ -9,7 +9,7 @@ from otobs.catalog import Parameter, Sim, State
 from otobs.sim_config import (SimConfig, Correlation, CorrGroup, Affect, Trend,
                               Dropout, TodProfile, validate)
 from otobs.simulate import (Stream, sample, next_state, process_stream,
-                            correlation_forces, _by_host)
+                            correlation_forces, _by_host, _fmt_eta, run_backfill)
 
 
 def numsim():
@@ -112,6 +112,53 @@ def test_validate_catches_typos():
             assert False, "validate accepted a bad reference"
         except ValueError:
             pass
+
+
+def test_fmt_eta():
+    assert _fmt_eta(0) == "00:00"
+    assert _fmt_eta(5) == "00:05"
+    assert _fmt_eta(65) == "01:05"
+    assert _fmt_eta(3661) == "1:01:01"
+
+
+def test_backfill_bucket_scheduler_fires_every_due_tick():
+    """run_backfill was rewritten from an O(n_streams)-scan-per-tick loop to
+    scheduling by shared interval bucket. This proves the swap didn't drop or
+    duplicate a single event: exact expected count per stream, mixing streams
+    that share an interval (exercise the bucket-grouping path) with streams
+    on staggered intervals (exercise independent ticks), real zabbix send()
+    faked out."""
+    import math
+    import zabbix_utils
+    from otobs.catalog import AssetClass, Host
+
+    def mk_param(key, interval):
+        return Parameter(key, key, "float", "", interval, "c", "col", "fm", "src", numsim(), [])
+
+    intervals = {"a": 5, "b": 5, "c": 7, "d": 11}  # a,b share a bucket; c,d each their own
+    asset = AssetClass("ac", "hg", "tmpl", "tg", [Host("H", "H")],
+                       [mk_param(k, f"{v}s") for k, v in intervals.items()])
+
+    sent_counts = []
+
+    class FakeSender:
+        def __init__(self, **_kw):
+            pass
+
+        def send(self, items):
+            sent_counts.append(len(items))
+
+    span_s = 97.0  # not evenly divisible by any interval above -> no boundary ambiguity
+    real_sender = zabbix_utils.Sender
+    zabbix_utils.Sender = FakeSender
+    try:
+        run_backfill([asset], cfg=SimConfig(), days=span_s / 86400.0, speed=1e6)
+    finally:
+        zabbix_utils.Sender = real_sender
+
+    expected = sum(math.floor(span_s / iv) + 1 for iv in intervals.values())
+    got = sum(sent_counts)
+    assert got == expected, f"bucket scheduler lost/duplicated events: got {got}, want {expected}"
 
 
 if __name__ == "__main__":
