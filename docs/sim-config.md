@@ -46,8 +46,8 @@ Override per run with `DAYS=` / `SPEED=`.
 | **steady** | A healthy plant on a normal day: calm, held at setpoint, few problems. | ✅ | ✅ (mild) | ✅ | ✅ (light) | – | 14 | keep high `SIM_STICKINESS` |
 | **realistic** | The flagship — how an actual station behaves: setpoints, daily cycles, causal cascades. | ✅ | ✅ (web) | ✅ | ✅ | ✅ | 7 | – |
 | **diurnal** | Showcase daily / shift-hour cycles tracking a moving setpoint. | ✅ | – | ✅ | ✅ (strong) | – | 14 | – |
-| **stress** | Exercise monitoring: frequent problems, hard cascades, `nodata()` alerts. | ✅ | ✅ (strong) | ✅ (short) | – | ✅ (heavy) | 2 | lower `SIM_STICKINESS` ≈0.80 |
-| **maintenance** | Sensors/links in and out of service — lots of `nodata()` gaps, plant stays healthy. | ✅ | – | ✅ | – | ✅ (uneven) | 3 | – |
+| **stress** | Exercise monitoring: frequent problems, hard cascades, frequent gaps. | ✅ | ✅ (strong) | ✅ (short) | – | ✅ (heavy) | 2 | lower `SIM_STICKINESS` ≈0.80 |
+| **maintenance** | Sensors/links in and out of service — lots of data gaps, plant stays healthy. | ✅ | – | ✅ | – | ✅ (uneven) | 3 | – |
 | **demo** | Punchy 5-minute live walkthrough: fast, obvious cascades. | ✅ | ✅ (strong) | ✅ (short) | – | ✅ (light) | 1 | lower `SIM_STICKINESS` ≈0.85 |
 | **ml** | Training data for Tahap 2/3 (clustering, RUL): long smooth labelled curves. | ✅ | ✅ (web) | ✅ (long) | – | – | 30 | raise `SIM_STICKINESS` ≈0.97 |
 
@@ -76,7 +76,7 @@ Three properties of real gas-transmission telemetry drive the `realistic` mode:
    per-host `correlation` web.
 
 Transitions between health bands then `trend`-ramp rather than step, and the odd reading
-is `dropout`-dropped so `nodata()` fires. The result is a stream that drifts, cycles,
+is `dropout`-dropped, leaving real gaps in history. The result is a stream that drifts, cycles,
 cascades and occasionally goes quiet — like a plant, not a random number generator.
 
 ---
@@ -175,11 +175,13 @@ time_of_day:
       off_peak_multiplier: 0.6
 ```
 
-### 5. `dropout` — real gaps for `nodata()`
+### 5. `dropout` — real gaps in the history
 
 Occasionally skip a due send: the state freezes, nothing is emitted, but `next_due`
-still advances — so a genuine one-interval gap forms and `nodata()` triggers fire. A
-drop is a missed reading, not a retry.
+still advances — so a genuine one-interval gap forms. A drop is a missed reading,
+not a retry. This is exactly the condition a Zabbix `nodata()` trigger alerts on;
+note the shipped catalog defines only `last()` threshold triggers, so gap *alerting*
+needs a hand-added `nodata()` trigger (the gap data itself is already real).
 
 ```yaml
 dropout:

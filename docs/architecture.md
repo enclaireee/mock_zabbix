@@ -101,7 +101,7 @@ eight modes and six features are documented in [sim-config.md](sim-config.md).
 | `correlation` | Per host, when a trigger param is in a given band it biases correlated params' next state toward degrading (stalled fan → rising CPU temp). |
 | `trend` | On a state change, ramps from the last value toward a target inside the new band over `ramp_seconds` (respecting `SIM_TIME_SCALE`) — a curve, not a step. |
 | `time_of_day` | Scales a value by a peak/off-peak multiplier by local hour (`settings.TIMEZONE`) — operational cycles. |
-| `dropout` | Skips a due send with some probability, leaving a genuine gap so `nodata()` triggers fire. |
+| `dropout` | Skips a due send with some probability, leaving a genuine gap — the raw material for `nodata()` alerting. |
 | `backfill` | `otobs.backfill` mode sweeps the state machine from `now − days` to `now` and pushes each value with its historical `clock`, so graphs have depth immediately. |
 
 This is a **data-plane** change only: the config plane (items, triggers,

@@ -110,7 +110,10 @@ triggers:
 
 - `op`: `=  <>  >  >=  <  <=`
 - `severity`: `info | warning | average | high | disaster`
-- `func` (optional, default `last`): the Zabbix function, e.g. `last`, `avg`.
+- `func` (optional, default `last`): the Zabbix history function. The generated
+  expression takes no argument window (`func(/tmpl/key)`), so only zero-argument
+  functions like `last` work; windowed ones (`avg(…,1h)`, `nodata(…,5m)`) would
+  need a schema extension.
 
 Generated expression: `last(/<template_name>/<key>) <op> <value>`. Two-sided
 limits (e.g. PSU brownout + overvoltage) are just two trigger entries.

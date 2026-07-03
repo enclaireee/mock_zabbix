@@ -39,12 +39,13 @@ see **[RUNNING.md](RUNNING.md)**.
 
 ## Documentation map
 
-Each doc has one job; none repeat another's content.
+Each doc has one job. The focused docs are quick references for a single
+topic; WALKTHROUGH.md is the deep version that synthesizes across them.
 
 | Doc | Answers |
 |-----|---------|
 | **[RUNNING.md](RUNNING.md)** | How do I install, run, configure, and troubleshoot this? |
-| **[WALKTHROUGH.md](WALKTHROUGH.md)** | What is this, why does it exist, and how do I present/defend it? (narrative, demo script, Q&A) |
+| **[WALKTHROUGH.md](WALKTHROUGH.md)** | The complete technical reference: every module, schema field, feature, Zabbix concept, and design decision, from first principles — plus the demo script and Q&A. |
 | **[docs/architecture.md](docs/architecture.md)** | How do the pieces fit together, and how does the mock map to real OT collectors? |
 | **[catalog/README.md](catalog/README.md)** | What's the YAML schema for `catalog/*.yml`? |
 | **[docs/sim-states.md](docs/sim-states.md)** | How does the simulator state machine work (states, bands, sticky transitions)? |
@@ -70,7 +71,7 @@ otobs/              python package
   └─ __main__.py    CLI: provision | simulate | backfill | config | list | check
 docs/               architecture + implementation-detail reference docs (see map above)
 RUNNING.md          install / run / configure / troubleshoot
-WALKTHROUGH.md      narrative tour, demo script, Q&A
+WALKTHROUGH.md      the complete technical reference (+ demo script, Q&A)
 docker-compose.yml  the real Zabbix 7.0 stack
 .env / .env.example central variables
 Makefile            orchestration

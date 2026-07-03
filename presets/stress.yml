@@ -1,6 +1,6 @@
 # preset: stress — exercise the MONITORING side, not the plant.
 # Strong causal cascades, short ramps so problems escalate fast, and heavy dropout
-# so nodata() triggers fire often. Pair with a LOW SIM_STICKINESS in .env (≈0.80)
+# so history is full of genuine gaps. Pair with a LOW SIM_STICKINESS in .env (≈0.80)
 # so states churn and problems appear/clear frequently.
 #   make config MODE=stress && make check && make backfill DAYS=2 && make simulate
 
@@ -43,7 +43,7 @@ trend:
 
 dropout:
   enabled: true
-  probability: 0.10      # frequent gaps -> nodata() fires often
+  probability: 0.10      # frequent gaps in history
   overrides:
     hmi.smart.health_passed: { probability: 0.0 }
 

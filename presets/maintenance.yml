@@ -1,6 +1,6 @@
 # preset: maintenance — a plant with sensors/links coming in and out of service.
 # Heavy, uneven dropout across many streams (bays isolated, RTUs rebooted, loops
-# under calibration) so lots of nodata() gaps form — the realism target here is
+# under calibration) so lots of data gaps form — the realism target here is
 # MISSING data, not degradation. The plant itself stays mostly healthy and calm.
 #   make config MODE=maintenance && make check && make backfill DAYS=3 && make simulate
 

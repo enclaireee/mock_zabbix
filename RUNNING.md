@@ -101,7 +101,7 @@ make config                    # show the active mode + what's available
 make config MODE=realistic     # flagship: how a real station behaves (setpoints, cycles, cascades)
 make config MODE=steady        # a healthy plant on a normal day — calm, few problems
 make config MODE=diurnal       # daily / shift-hour demand cycles
-make config MODE=stress        # frequent problems + nodata() alerts, to exercise monitoring
+make config MODE=stress        # frequent problems + data gaps, to exercise monitoring
 make config MODE=maintenance   # sensors/links dropping in and out (lots of nodata gaps)
 make config MODE=demo          # punchy fast cascades for a 5-minute live walkthrough
 make config MODE=ml            # long smooth labelled curves, for Tahap 2/3 training
@@ -122,7 +122,7 @@ manual `make backfill` step. Full mode + feature reference: **[docs/sim-config.m
 | `correlation` | When one param degrades, bias correlated params toward degrading too (e.g. a stalled fan drives CPU temperature up), per host |
 | `trend` | Ramp gradually from the last value into the new band over `ramp_seconds` instead of stepping — realistic wear curves |
 | `time_of_day` | Scale a value by a peak/off-peak multiplier by local hour (shift-hour load) |
-| `dropout` | Occasionally skip a due send so Zabbix `nodata()` triggers get exercised |
+| `dropout` | Occasionally skip a due send, leaving a genuine gap — the condition a Zabbix `nodata()` trigger alerts on (none shipped in the catalog yet; see WALKTHROUGH) |
 | `backfill` | `make backfill` generates days/weeks of backdated history with correct timestamps in one run |
 
 `make check` validates the active file against the catalog (unknown param key, bad
