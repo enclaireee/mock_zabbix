@@ -165,6 +165,13 @@ hour (`settings.TIMEZONE`); `peak_hours` wraps past midnight if `start > end`. W
 tracks the cycle smoothly); with continuity off, it scales the raw sample directly.
 Best applied to demand-linked params (flow, compressor speed/load, operator CPU).
 
+Demand doesn't step at the window edge — grid load (and the gas that fuels it) ramps
+over roughly 2–3 hours. `shoulder_hours` is the width of a **linear blend** centred on
+each boundary (the exact edge sits at the blend midpoint); `0` restores a hard step.
+The simulator feeds a fractional local hour (minute resolution), so the ramp is smooth,
+not hourly-stepped. Presets use ~3 h for process demand and ~1 h for shift-driven
+operator load.
+
 ```yaml
 time_of_day:
   enabled: true
@@ -173,6 +180,7 @@ time_of_day:
       peak_hours: [8, 17]
       peak_multiplier: 1.4
       off_peak_multiplier: 0.6
+      shoulder_hours: 1        # optional, default 2; blend width at each edge
 ```
 
 ### 5. `dropout` — real gaps in the history
@@ -227,8 +235,10 @@ whether a mode is *meant* to be backfilled. `days` / `speed_multiplier` are the 
 ## Validation
 
 `make check` (and `make config`) load the active config and assert every referenced
-param key and band exists in the catalog, and every number is in range (negative
-probability, zero ramp, hour > 24 all fail loudly) — **before** any data is sent. The
-shipped presets are additionally checked in `test_sim.py`
-(`test_presets_validate_against_catalog`), so a typo in a mode file is caught in the
-test suite, not at run time.
+param key and band exists in the catalog, every number is in range (negative
+probability, zero ramp, hour > 24 all fail loudly), **and** that `trend.overrides` /
+`time_of_day.profiles` target *numeric* parameters — on an enum param both are silent
+no-ops (a fixed value has no ramp and no setpoint), so dead config is rejected rather
+than ignored. All of this runs **before** any data is sent. The shipped presets are
+additionally checked in `test_sim.py` (`test_presets_validate_against_catalog`), so a
+typo in a mode file is caught in the test suite, not at run time.

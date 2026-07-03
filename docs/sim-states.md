@@ -39,7 +39,7 @@ behavior on top. **Every feature defaults off**; with the file absent or all
 | `continuity` | **value sampling** | While in-band, step from the last reading instead of re-drawing the whole band: analog signals (`jitter>0`) mean-revert to a setpoint with noise (a PID loop), `jitter=0` counters hold. |
 | `correlation` | **state selection** | On a tick where a trigger param is in `trigger.band`, an affected param's next state is forced toward `bias_band` (prob. `strength`) instead of using its own weights. Per host; composable across groups. |
 | `trend` | **value sampling** | On a state transition, ramp from the last emitted value toward a fresh target inside the new band over `ramp_seconds` (÷ `SIM_TIME_SCALE`), with jitter — no band clamp during the ramp. |
-| `time_of_day` | **value sampling** | Multiply the sampled value by a peak/off-peak factor by local hour before jitter. |
+| `time_of_day` | **value sampling** | Multiply the sampled value by a peak/off-peak factor by (fractional) local hour before jitter, blending linearly over `shoulder_hours` at each window edge. |
 | `dropout` | **emission** | Skip a due send entirely (state frozen, `next_due` still advances) so a real gap forms. |
 | `backfill` | **timing** | Run the same machine over a past window, stamping each value with its historical `clock`. |
 
@@ -79,6 +79,7 @@ time_of_day:
       peak_hours: [8, 17]     # local hours (settings.TIMEZONE); wraps if start > end
       peak_multiplier: 1.4
       off_peak_multiplier: 0.6
+      shoulder_hours: 2       # linear blend width at each edge; 0 = hard step
 
 dropout:
   enabled: false

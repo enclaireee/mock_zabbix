@@ -14,6 +14,10 @@ def _param_bands(assets) -> dict[str, set]:
             for a in assets for p in a.parameters}
 
 
+def _numeric_keys(assets) -> set[str]:
+    return {p.key for a in assets for p in a.parameters if p.sim.kind == "numeric"}
+
+
 def _sim_config_summary(cfg) -> None:
     feats = cfg.enabled_features()
     print(f"\nsim-config: {', '.join(feats) if feats else 'all features off (baseline behavior)'}")
@@ -65,7 +69,8 @@ def cmd_check() -> None:
                 assert t.severity and t.op
 
     cfg = load_sim_config()
-    validate(cfg, _param_bands(assets))  # loud fail on a typo'd param key / band
+    # loud fail on a typo'd param key / band, or dead config on an enum param
+    validate(cfg, _param_bands(assets), _numeric_keys(assets))
     print(f"OK — {sum(len(a.parameters) for a in assets)} parameters across "
           f"{len(assets)} asset classes, {n} samples generated, all in-band.")
     feats = cfg.enabled_features()
@@ -114,8 +119,8 @@ def cmd_config(rest: list[str]) -> None:
             print(f"unknown mode {rest[0]!r}. Available: {', '.join(names)}"); sys.exit(2)
 
     assets = load_all()
-    param_bands = _param_bands(assets)
-    validate(load_sim_config_file(src), param_bands)  # loud fail before we activate it
+    # loud fail before we activate it (typos AND dead enum-param config)
+    validate(load_sim_config_file(src), _param_bands(assets), _numeric_keys(assets))
     active.write_text(src.read_text())
     feats = load_sim_config().enabled_features()
     print(f"Activated '{src.stem}' -> catalog/sim_config.yml")

@@ -25,12 +25,15 @@ continuity:
 # to (rather than scaling the raw sample). Peak hours in local time (settings.TIMEZONE).
 # Gas-for-power demand tracks the grid: lowest pre-dawn (~05:00), high through the
 # working day into the Java-Bali evening peak — hence the wide 06-22 peak window.
+# shoulder_hours = width of the linear blend at each window edge: grid demand
+# ramps over ~3h (morning pick-up / evening decay), so the process chain gets 3;
+# operator load follows shift changes, which are sharper — 1h.
 time_of_day:
   enabled: true
   profiles:
-    - { param: "proc.flow.rate",  peak_hours: [6, 22], peak_multiplier: 1.15, off_peak_multiplier: 0.85 }
-    - { param: "proc.comp.speed", peak_hours: [6, 22], peak_multiplier: 1.10, off_peak_multiplier: 0.92 }
-    - { param: "hmi.cpu.util",    peak_hours: [7, 19], peak_multiplier: 1.30, off_peak_multiplier: 0.70 }
+    - { param: "proc.flow.rate",  peak_hours: [6, 22], peak_multiplier: 1.15, off_peak_multiplier: 0.85, shoulder_hours: 3 }
+    - { param: "proc.comp.speed", peak_hours: [6, 22], peak_multiplier: 1.10, off_peak_multiplier: 0.92, shoulder_hours: 3 }
+    - { param: "hmi.cpu.util",    peak_hours: [7, 19], peak_multiplier: 1.30, off_peak_multiplier: 0.70, shoulder_hours: 1 }
 
 # Real causal chains, per host (trigger and affected params live on the same host).
 correlation:

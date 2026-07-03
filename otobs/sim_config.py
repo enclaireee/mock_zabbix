@@ -81,15 +81,31 @@ class Trend:
 
 @dataclass
 class TodProfile:
+    """Peak/off-peak multiplier by local hour, with a linear shoulder blend.
+
+    Real demand doesn't step: grid (and hence gas-for-power) load ramps over
+    roughly 2-3 hours in the morning and evening. shoulder_hours is the width
+    of that blend, centred on each window boundary; 0 restores a hard step."""
     peak_start: int
     peak_end: int
     peak_multiplier: float
     off_peak_multiplier: float
+    shoulder_hours: float = 2.0
 
-    def multiplier(self, hour: int) -> float:
-        lo, hi = self.peak_start, self.peak_end
-        peak = (lo <= hour < hi) if lo <= hi else (hour >= lo or hour < hi)
-        return self.peak_multiplier if peak else self.off_peak_multiplier
+    def multiplier(self, hour: float) -> float:
+        s, e = self.peak_start, self.peak_end
+        span = (e - s) % 24
+        if span == 0:
+            # e == s: empty window (always off-peak); s..s+24: all-day peak.
+            return self.peak_multiplier if e != s else self.off_peak_multiplier
+        a = (hour - s) % 24
+        # Signed depth to the nearest window edge: + inside, - outside.
+        depth = min(a, span - a) if a < span else -min(24 - a, a - span)
+        if self.shoulder_hours <= 0:
+            p = 1.0 if depth >= 0 else 0.0
+        else:
+            p = min(1.0, max(0.0, 0.5 + depth / self.shoulder_hours))
+        return self.off_peak_multiplier + (self.peak_multiplier - self.off_peak_multiplier) * p
 
 
 @dataclass
@@ -97,7 +113,7 @@ class TimeOfDay:
     enabled: bool = False
     profiles: dict[str, TodProfile] = field(default_factory=dict)
 
-    def multiplier(self, key: str, hour: int) -> float:
+    def multiplier(self, key: str, hour: float) -> float:
         if not self.enabled:
             return 1.0
         p = self.profiles.get(key)
@@ -188,7 +204,8 @@ def _tod(raw: dict) -> TimeOfDay:
         profiles[param] = TodProfile(
             start, end,
             _num(p, "peak_multiplier", 1.0, where, 0.0),
-            _num(p, "off_peak_multiplier", 1.0, where, 0.0))
+            _num(p, "off_peak_multiplier", 1.0, where, 0.0),
+            _num(p, "shoulder_hours", 2.0, where, 0.0, 12.0))
     return TimeOfDay(bool(raw.get("enabled", False)), profiles)
 
 
@@ -229,9 +246,16 @@ def load_sim_config(directory: Path | None = None) -> SimConfig:
     return load_sim_config_file((directory or CATALOG_DIR) / SIM_CONFIG_FILE)
 
 
-def validate(cfg: SimConfig, param_bands: dict[str, set]) -> None:
+def validate(cfg: SimConfig, param_bands: dict[str, set],
+             numeric_keys: set[str] | None = None) -> None:
     """Assert every referenced param key exists and every band is real for it.
-    param_bands: {param_key: {band names}}. Raises ValueError on a typo."""
+    param_bands: {param_key: {band names}}. Raises ValueError on a typo.
+
+    With numeric_keys given, also reject trend overrides and time_of_day
+    profiles on enum parameters — both are silent no-ops there (a fixed enum
+    value has no ramp and no setpoint), so the config is dead and almost
+    certainly a mistake. Dropout overrides stay valid for enums (a gap is a
+    gap regardless of value kind)."""
     def need_param(key: str, where: str) -> None:
         if key not in param_bands:
             raise ValueError(f"{where}: unknown parameter key {key!r}")
@@ -243,13 +267,19 @@ def validate(cfg: SimConfig, param_bands: dict[str, set]) -> None:
                 f"{where}: parameter {key!r} has no band {band!r} "
                 f"(available: {sorted(param_bands[key])})")
 
+    def need_numeric(key: str, where: str, why: str) -> None:
+        need_param(key, where)
+        if numeric_keys is not None and key not in numeric_keys:
+            raise ValueError(f"{where}: parameter {key!r} is enum — {why}")
+
     for g in cfg.correlation.groups:
         need_band(g.trigger_param, g.trigger_band, f"correlation.{g.name}.trigger")
         for a in g.affects:
             need_band(a.param, a.bias_band, f"correlation.{g.name}.affects")
     for k in cfg.trend.overrides:
-        need_param(k, "trend.overrides")
+        need_numeric(k, "trend.overrides", "a trend ramp only applies to numeric bands")
     for k in cfg.time_of_day.profiles:
-        need_param(k, "time_of_day.profiles")
+        need_numeric(k, "time_of_day.profiles",
+                     "a time-of-day multiplier has no effect on fixed enum values")
     for k in cfg.dropout.overrides:
         need_param(k, "dropout.overrides")

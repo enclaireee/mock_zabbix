@@ -176,10 +176,12 @@ def test_presets_validate_against_catalog():
     from otobs.settings import PRESETS_DIR
     assets = load_all()
     bands = {p.key: {st.band for st in p.sim.states} for a in assets for p in a.parameters}
+    numeric = {p.key for a in assets for p in a.parameters if p.sim.kind == "numeric"}
     files = sorted(PRESETS_DIR.glob("*.yml"))
     assert files, "no presets found"
     for f in files:
-        validate(load_sim_config_file(f), bands)  # raises on a bad reference
+        # raises on a bad reference or on dead enum-param config
+        validate(load_sim_config_file(f), bands, numeric)
 
 
 def test_dropout():
@@ -191,10 +193,50 @@ def test_dropout():
 
 
 def test_tod_profile():
-    p = TodProfile(8, 17, 1.4, 0.6)
-    assert p.multiplier(12) == 1.4 and p.multiplier(3) == 0.6
+    p = TodProfile(8, 17, 1.4, 0.6)  # default 2h shoulder
+    assert p.multiplier(12) == 1.4 and p.multiplier(3) == 0.6  # deep in/out unchanged
     wrap = TodProfile(22, 6, 2.0, 1.0)  # overnight window wraps midnight
     assert wrap.multiplier(23) == 2.0 and wrap.multiplier(12) == 1.0
+
+
+def test_tod_shoulder_blend():
+    """Demand ramps over hours, it doesn't step: the boundary is a linear blend
+    of width shoulder_hours, the exact edge is the midpoint, and shoulder 0
+    restores the hard step."""
+    p = TodProfile(8, 17, 1.4, 0.6, shoulder_hours=2.0)
+    mid = (1.4 + 0.6) / 2
+    assert abs(p.multiplier(8.0) - mid) < 1e-9, "edge should be the blend midpoint"
+    assert 0.6 < p.multiplier(7.5) < mid < p.multiplier(8.5) < 1.4, "blend not monotone"
+    assert p.multiplier(9.0) == 1.4 and p.multiplier(7.0) == 0.6  # shoulder ends
+    hard = TodProfile(8, 17, 1.4, 0.6, shoulder_hours=0.0)
+    assert hard.multiplier(8.0) == 1.4 and hard.multiplier(7.99) == 0.6
+    wrap = TodProfile(22, 6, 2.0, 1.0, shoulder_hours=2.0)  # blend across midnight
+    assert abs(wrap.multiplier(22.0) - 1.5) < 1e-9
+    assert wrap.multiplier(0.0) == 2.0 and wrap.multiplier(12.0) == 1.0
+    allday = TodProfile(0, 24, 1.15, 0.5)   # full-day window: always peak
+    assert allday.multiplier(3) == 1.15 and allday.multiplier(15) == 1.15
+    empty = TodProfile(0, 0, 1.4, 0.6)      # empty window: always off-peak
+    assert empty.multiplier(12) == 0.6
+
+
+def test_validate_rejects_dead_enum_config():
+    """A trend override or ToD profile on an enum param is a silent no-op —
+    with numeric_keys given, validate() must reject it. Dropout stays legal."""
+    from otobs.sim_config import TimeOfDay
+    bands = {"mode": {"good", "failed"}, "temp": {"good", "underperform", "failed"}}
+    numeric = {"temp"}  # "mode" is enum
+    ok = SimConfig(trend=Trend(True, 1800, {"temp": 900}),
+                   time_of_day=TimeOfDay(True, {"temp": TodProfile(8, 17, 1.2, 0.8)}),
+                   dropout=Dropout(True, 0.1, {"mode": 0.0}))
+    validate(ok, bands, numeric)  # numeric targets + enum dropout: all fine
+    for bad in (SimConfig(trend=Trend(True, 1800, {"mode": 900})),
+                SimConfig(time_of_day=TimeOfDay(True, {"mode": TodProfile(8, 17, 1.2, 0.8)}))):
+        try:
+            validate(bad, bands, numeric)
+            assert False, "dead enum-param config accepted"
+        except ValueError as e:
+            assert "enum" in str(e)
+        validate(bad, bands)  # without numeric_keys: old lenient behavior
 
 
 def test_validate_catches_typos():

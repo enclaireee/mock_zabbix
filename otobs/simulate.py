@@ -26,8 +26,11 @@ except Exception:  # noqa: BLE001
     _TZ = None
 
 
-def _hour(unix_ts: float) -> int:
-    return datetime.fromtimestamp(unix_ts, _TZ).hour
+def _hour(unix_ts: float) -> float:
+    """Local hour as a fraction (13.5 = 13:30) — the time-of-day shoulder blend
+    needs sub-hour resolution or the 'smooth' ramp would still step hourly."""
+    t = datetime.fromtimestamp(unix_ts, _TZ)
+    return t.hour + t.minute / 60.0
 
 
 def sample(sim: Sim, state: State, value_type: str = "float"):
@@ -44,7 +47,7 @@ def _typed(v: float, value_type: str):
 
 
 def sample_stream(s: "Stream", st: State, now: float, scale: float,
-                  cfg: SimConfig, hour: int):
+                  cfg: SimConfig, hour: float):
     """Value for this tick honoring continuity walk + trend ramp + time-of-day.
     Falls back to the exact original sample() when none is engaged — the no-op path."""
     sim = s.param.sim
@@ -158,7 +161,7 @@ def correlation_forces(cfg: SimConfig, by_host: dict) -> dict:
 
 
 def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
-                   forced: dict, hour: int):
+                   forced: dict, hour: float):
     """Advance one due stream one tick. Returns the emitted value, or None if the
     reading was dropped. Shared by live run() and backfill(). Caller owns next_due."""
     if cfg.dropout.enabled and random.random() < cfg.dropout.prob_for(s.param.key):
@@ -199,12 +202,14 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
 
     while True:
         now = time.monotonic()
-        hour = _hour(time.time()) if cfg.time_of_day.enabled else 0
+        due = [s for s in streams if s.next_due <= now]
+        if not due:  # idle tick: no hour lookup, no correlation rolls
+            time.sleep(0.5)
+            continue
+        hour = _hour(time.time()) if cfg.time_of_day.enabled else 0.0
         forced = correlation_forces(cfg, by_host)
         batch, notes = [], []
-        for s in streams:
-            if s.next_due > now:
-                continue
+        for s in due:
             s.next_due = now + s.param.interval_s / scale
             value = process_stream(s, now, scale, cfg, forced, hour)
             if value is None:
@@ -296,8 +301,9 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
         batch.clear()
 
     vt = start
+    sleep_debt = 0.0  # accumulate tiny per-event pauses; see below
     while group_due and vt < end:
-        hour = _hour(vt) if cfg.time_of_day.enabled else 0
+        hour = _hour(vt) if cfg.time_of_day.enabled else 0.0
         forced = correlation_forces(cfg, by_host)
         for iv, due_t in group_due.items():
             if due_t > vt:
@@ -318,7 +324,14 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
             eta = (now - wall_start) * (1 - frac) / frac if frac > 0 else 0.0
             _print_progress(frac, eta, sent)
             last_print = now
-        time.sleep(min((vt - prev) / speed, 5.0))
+        # Pace wall time without a syscall per event: at high SPEED the owed
+        # pause per tick is microseconds, but sleep() granularity is ~1ms+, so
+        # sleeping every tick runs far below the requested speed. Bank the debt
+        # and sleep only once it's noticeable (capped, as before, at 5s).
+        sleep_debt += (vt - prev) / speed
+        if sleep_debt >= 0.005:
+            time.sleep(min(sleep_debt, 5.0))
+            sleep_debt = 0.0
 
     flush()
     _print_progress(1.0, 0.0, sent)

@@ -12,8 +12,8 @@ continuity:
 time_of_day:
   enabled: true
   profiles:
-    - { param: "proc.flow.rate",  peak_hours: [6, 22], peak_multiplier: 1.08, off_peak_multiplier: 0.92 }
-    - { param: "hmi.cpu.util",    peak_hours: [7, 19], peak_multiplier: 1.20, off_peak_multiplier: 0.80 }
+    - { param: "proc.flow.rate",  peak_hours: [6, 22], peak_multiplier: 1.08, off_peak_multiplier: 0.92, shoulder_hours: 3 }
+    - { param: "hmi.cpu.util",    peak_hours: [7, 19], peak_multiplier: 1.20, off_peak_multiplier: 0.80, shoulder_hours: 1 }
 
 # Only the strongest, most physical chains — a calm plant still cascades on a real fault.
 correlation:

@@ -15,12 +15,13 @@ time_of_day:
   enabled: true
   profiles:
     # Throughput chain rises through the working day, lulls overnight (lowest ~05:00).
-    - { param: "proc.flow.rate",             peak_hours: [6, 22], peak_multiplier: 1.20, off_peak_multiplier: 0.80 }
-    - { param: "proc.comp.speed",            peak_hours: [6, 22], peak_multiplier: 1.12, off_peak_multiplier: 0.90 }
-    - { param: "proc.comp.discharge_pressure", peak_hours: [6, 22], peak_multiplier: 1.06, off_peak_multiplier: 0.96 }
-    # Operator activity follows the day shift.
-    - { param: "hmi.cpu.util",               peak_hours: [7, 19], peak_multiplier: 1.40, off_peak_multiplier: 0.60 }
-    - { param: "hmi.mem.available",          peak_hours: [7, 19], peak_multiplier: 0.85, off_peak_multiplier: 1.10 }
+    # 3h shoulders: grid demand ramps over hours, it doesn't step at 06:00.
+    - { param: "proc.flow.rate",             peak_hours: [6, 22], peak_multiplier: 1.20, off_peak_multiplier: 0.80, shoulder_hours: 3 }
+    - { param: "proc.comp.speed",            peak_hours: [6, 22], peak_multiplier: 1.12, off_peak_multiplier: 0.90, shoulder_hours: 3 }
+    - { param: "proc.comp.discharge_pressure", peak_hours: [6, 22], peak_multiplier: 1.06, off_peak_multiplier: 0.96, shoulder_hours: 3 }
+    # Operator activity follows the day shift — sharper transitions (1h).
+    - { param: "hmi.cpu.util",               peak_hours: [7, 19], peak_multiplier: 1.40, off_peak_multiplier: 0.60, shoulder_hours: 1 }
+    - { param: "hmi.mem.available",          peak_hours: [7, 19], peak_multiplier: 0.85, off_peak_multiplier: 1.10, shoulder_hours: 1 }
 
 correlation: { enabled: false }
 

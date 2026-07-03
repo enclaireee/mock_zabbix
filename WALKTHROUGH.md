@@ -593,14 +593,18 @@ accumulates over hours (7200 s). The `ml` preset deliberately stretches these
 (2–6 h) — an RUL model needs a learnable slope, and that divergence from
 physical timing is documented in the preset itself.
 
-**4. `time_of_day` (profiles: peak hours + multipliers)** — gas throughput is
-*diurnal* because it feeds power generation: lowest pre-dawn (~05:00), high
-through the working day into the Java-Bali evening peak — hence the wide
-06–22 peak window on flow/compressor speed, and a 07–19 window on operator
-CPU (shift hours). The multiplier shifts the continuity *setpoint* rather
-than multiplying each sample (which would compound with the walk); windows
-wrap past midnight when `start > end`. On `jitter = 0` counters it does
-nothing — a counter has no setpoint.
+**4. `time_of_day` (profiles: peak hours + multipliers + shoulder)** — gas
+throughput is *diurnal* because it feeds power generation: lowest pre-dawn
+(~05:00), high through the working day into the Java-Bali evening peak —
+hence the wide 06–22 peak window on flow/compressor speed, and a 07–19 window
+on operator CPU (shift hours). And demand *ramps*, it doesn't step: the
+multiplier blends linearly over `shoulder_hours` at each window edge (~3 h
+for grid-driven process demand, ~1 h for shift-change operator load; 0 = hard
+step), fed a minute-resolution fractional hour so the ramp is smooth. The
+multiplier shifts the continuity *setpoint* rather than multiplying each
+sample (which would compound with the walk); windows wrap past midnight when
+`start > end`. On `jitter = 0` counters it does nothing — a counter has no
+setpoint.
 
 **5. `dropout` (probability + per-param overrides)** — real SCADA history has
 *holes*: field-link retries, RTU reboots, transmitters under calibration,
@@ -845,13 +849,17 @@ Three layers, all offline (no Zabbix required), all fast:
    (after the ramp expires the walk takes over in-band); continuity walks
    in small steps where the legacy path teleports; jitter-0 counters hold
    exactly; reversion converges to the setpoint and time-of-day shifts it;
-   dropout at p=0/p=1; the midnight-wrapping peak window; `validate()`
-   rejects bad param/band references; every shipped preset validates against
-   the real catalog (a typo in a preset fails in CI-style, not at demo
-   time); the catalog loader's guards (zero intervals, zero weights, enum
-   band collisions, unknown trigger fields, short weight lists); the
-   backfill bucket scheduler fires *exactly* the expected event count (no
-   drops, no duplicates) with a faked-out sender; and the ETA formatter.
+   dropout at p=0/p=1; the midnight-wrapping peak window and the shoulder
+   blend (edge = midpoint, monotone, wrap-safe, `shoulder_hours: 0` = the old
+   hard step); `validate()` rejects bad param/band references *and* dead
+   config (a trend override or ToD profile on an enum param is a silent
+   no-op, so it's an error); every shipped preset validates against the real
+   catalog under those strict rules (a typo in a preset fails in CI-style,
+   not at demo time); the catalog loader's guards (zero intervals, zero
+   weights, enum band collisions, unknown trigger fields, short weight
+   lists); the backfill bucket scheduler fires *exactly* the expected event
+   count (no drops, no duplicates) with a faked-out sender; and the ETA
+   formatter.
 3. **Provision-time validation** — `make config` re-validates a preset
    before activating it; `provision` itself only ever sees a catalog that
    already parsed. The reconciler was verified against the live stack
