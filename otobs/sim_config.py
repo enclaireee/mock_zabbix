@@ -85,9 +85,10 @@ class TodProfile:
 
     Real demand doesn't step: grid (and hence gas-for-power) load ramps over
     roughly 2-3 hours in the morning and evening. shoulder_hours is the width
-    of that blend, centred on each window boundary; 0 restores a hard step."""
-    peak_start: int
-    peak_end: int
+    of that blend, centred on each window boundary; 0 restores a hard step.
+    Boundaries are floats so a shoulder can be centred on a half-hour edge."""
+    peak_start: float
+    peak_end: float
     peak_multiplier: float
     off_peak_multiplier: float
     shoulder_hours: float = 2.0
@@ -197,15 +198,26 @@ def _tod(raw: dict) -> TimeOfDay:
         ph = p.get("peak_hours", [0, 0])
         if not (isinstance(ph, list) and len(ph) == 2):
             raise ValueError(f"{where}.peak_hours must be [start, end]")
-        start, end = int(ph[0]), int(ph[1])
+        # Floats, not ints: a shoulder can be centred on a half-hour edge
+        # (e.g. a 07:30 shift start), and multiplier() is float-safe throughout.
+        start, end = float(ph[0]), float(ph[1])
         for h in (start, end):
             if not 0 <= h <= 24:
                 raise ValueError(f"{where}.peak_hours hour out of range 0..24: {h}")
+        shoulder = _num(p, "shoulder_hours", 2.0, where, 0.0, 12.0)
+        span = (end - start) % 24
+        if 0 < span < 24:  # 0 and 24 are the all-day/empty special cases (no shoulder)
+            limit = min(span, 24 - span)
+            if shoulder > limit:
+                raise ValueError(
+                    f"{where}.shoulder_hours={shoulder} exceeds {limit} (min of the "
+                    f"peak window {span}h and the off-peak window {24 - span}h) — "
+                    f"the multiplier would never reach its full peak/off-peak value")
         profiles[param] = TodProfile(
             start, end,
             _num(p, "peak_multiplier", 1.0, where, 0.0),
             _num(p, "off_peak_multiplier", 1.0, where, 0.0),
-            _num(p, "shoulder_hours", 2.0, where, 0.0, 12.0))
+            shoulder)
     return TimeOfDay(bool(raw.get("enabled", False)), profiles)
 
 

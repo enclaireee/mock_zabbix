@@ -169,8 +169,13 @@ Demand doesn't step at the window edge — grid load (and the gas that fuels it)
 over roughly 2–3 hours. `shoulder_hours` is the width of a **linear blend** centred on
 each boundary (the exact edge sits at the blend midpoint); `0` restores a hard step.
 The simulator feeds a fractional local hour (minute resolution), so the ramp is smooth,
-not hourly-stepped. Presets use ~3 h for process demand and ~1 h for shift-driven
-operator load.
+not hourly-stepped. `peak_hours` boundaries are floats too (`[7.5, 19.5]` is valid), so a
+shoulder can be centred on a half-hour edge. Presets use ~3 h for process demand and
+~1 h for shift-driven operator load.
+
+A `shoulder_hours` wider than the narrower of the peak/off-peak span is rejected at load:
+past that point the multiplier can never actually reach its nominal peak or off-peak
+value anywhere in the window, which is silent under-delivery rather than a usable config.
 
 ```yaml
 time_of_day:

@@ -45,3 +45,17 @@ the Zabbix UI to those fields are overwritten; anything else on the host
 `prune` deletes catalog-managed hosts that are no longer in the catalog (e.g. a
 site removed from `sites.yml`). It is scoped strictly to the catalog's own host
 groups, so it never touches hosts created outside this tool.
+
+## One bad object doesn't abort the run
+
+Every mutating call — `_item`, `_triggers`, `_host`, `ensure_geomap`, and the
+prune deletions — is wrapped and routed through `Provisioner._fail`, which
+records the error and prints `! FAILED <what>: <reason>` instead of letting
+the exception propagate. `apply()`'s own setup (get-or-create the containers,
+fetch existing items/triggers/hosts) is wrapped the same way; if it fails,
+that asset class is skipped but the rest of the run continues. `main()` always
+runs `prune()` and logs out, then prints a summary and exits 1 if
+`Provisioner.errors` is non-empty. Concretely: if Zabbix rejects one item
+(e.g. a `value_type` change on an item that already has history), that one
+item is reported and skipped — the other 40 parameters, the triggers, and all
+12 hosts still get reconciled in the same run.

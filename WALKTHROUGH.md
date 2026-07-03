@@ -163,10 +163,10 @@ wins over the file (normal 12-factor precedence). Exposes:
 | `ROOT`, `CATALOG_DIR`, `PRESETS_DIR` | paths | everyone |
 
 There is deliberately no `python-dotenv` dependency: the parser is ~10 lines
-and this repo's `.env` grammar is trivial. `_f()` wraps float parsing with a
-fallback so a malformed number degrades to the default instead of crashing.
-(One deliberate exception: a malformed `ZBX_SENDER_PORT` *does* crash at
-import — a wrong port silently defaulting to 10051 would be worse.)
+and this repo's `.env` grammar is trivial. `_f()`/`_i()` wrap float/int parsing
+with a fallback to the default on a bad value — every setting degrades rather
+than crashing, including `SENDER_PORT`: `list`/`check`/`config` never dial it,
+so a typo there must not take down commands that are documented as offline.
 
 ### The Makefile
 
@@ -451,6 +451,26 @@ For each of the four asset classes:
   deleted, manual changes and all — group membership is the contract that
   says "this object is catalog-managed".
 
+### 4.3.1 One bad object doesn't abort the run
+
+Every create/update/delete call in `_item`, `_triggers`, `_host`,
+`ensure_geomap`, and `prune` is wrapped and reported through
+`Provisioner._fail`, which appends to `self.errors` and prints
+`! FAILED <what>: <reason>` instead of raising. `apply()`'s own setup step
+(the get-or-create containers plus the three existence fetches) is wrapped
+the same way — if *that* fails, the asset class is skipped (nothing to
+reconcile without it) but the loop moves on to the next one. `main()` still
+runs `prune()` and closes the session either way, then prints a final
+`Provisioning finished with N error(s)` summary and exits 1 if anything
+failed. The alternative — one exception anywhere aborting the whole run —
+means a single Zabbix-side rejection (e.g. refusing a `value_type` change on
+an item that already has history) leaves every asset class after the failing
+one completely untouched, with nothing but a raw traceback to show for it.
+Verified live: an item with a syntactically invalid trigger function raises
+`Invalid params … unknown function`, which is caught and reported, exit code
+1 — but the other three asset classes and all their hosts still reconciled
+in the same run.
+
 ### 4.4 What idempotent means here, precisely
 
 | You change… | Re-provision does… |
@@ -600,11 +620,17 @@ hence the wide 06–22 peak window on flow/compressor speed, and a 07–19 windo
 on operator CPU (shift hours). And demand *ramps*, it doesn't step: the
 multiplier blends linearly over `shoulder_hours` at each window edge (~3 h
 for grid-driven process demand, ~1 h for shift-change operator load; 0 = hard
-step), fed a minute-resolution fractional hour so the ramp is smooth. The
-multiplier shifts the continuity *setpoint* rather than multiplying each
-sample (which would compound with the walk); windows wrap past midnight when
-`start > end`. On `jitter = 0` counters it does nothing — a counter has no
-setpoint.
+step), fed a minute-resolution fractional hour so the ramp is smooth. Window
+edges (`peak_hours`) are floats too, so a shoulder can be centred on a
+half-hour boundary — not just the top of the hour. Loaded at `sim_config.yml`
+parse time, `_tod()` rejects a `shoulder_hours` wider than the narrower of the
+peak/off-peak span: a shoulder that overruns both edges of a narrow window
+would mean the multiplier never actually reaches its nominal peak or
+off-peak value anywhere, which is silent under-delivery, not a working
+config, so it fails loudly instead. The multiplier shifts the continuity
+*setpoint* rather than multiplying each sample (which would compound with
+the walk); windows wrap past midnight when `start > end`. On `jitter = 0`
+counters it does nothing — a counter has no setpoint.
 
 **5. `dropout` (probability + per-param overrides)** — real SCADA history has
 *holes*: field-link retries, RTU reboots, transmitters under calibration,
@@ -858,13 +884,17 @@ Three layers, all offline (no Zabbix required), all fast:
    not at demo time); the catalog loader's guards (zero intervals, zero
    weights, enum band collisions, unknown trigger fields, short weight
    lists); the backfill bucket scheduler fires *exactly* the expected event
-   count (no drops, no duplicates) with a faked-out sender; and the ETA
-   formatter.
+   count (no drops, no duplicates) with a faked-out sender; the ETA formatter;
+   and that a rejected `item`/`trigger`/`host`/geomap call is recorded into
+   `Provisioner.errors` rather than raised, against a minimal fake API (proof
+   that one bad object can't abort the objects behind it — §4.3.1).
 3. **Provision-time validation** — `make config` re-validates a preset
    before activating it; `provision` itself only ever sees a catalog that
-   already parsed. The reconciler was verified against the live stack
-   manually (§4.4) — it has no offline test because faking the Zabbix API
-   convincingly costs more than it protects; flagged as a known gap.
+   already parsed. The reconciler's happy path (create, update, prune,
+   idempotent re-run) was verified against the live stack manually (§4.4);
+   its failure-isolation path was verified both with a fake API (above) and
+   live, by feeding it a trigger with a deliberately invalid function and
+   confirming the other three asset classes still reconciled.
 
 Why no pytest: the repo's tests are executable specifications, a few asserts
 each; a framework would add a dependency and fixtures for zero additional

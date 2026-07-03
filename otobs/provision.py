@@ -15,12 +15,20 @@ class Provisioner:
         self.api = ZabbixAPI(url=settings.API_URL)
         self.api.login(user=settings.API_USER, password=settings.API_PASSWORD)
         print(f"Connected to Zabbix API {self.api.api_version()} as {settings.API_USER}")
+        self.errors: list[str] = []
 
     def close(self) -> None:
         try:
             self.api.logout()
         except Exception:  # noqa: BLE001
             pass
+
+    def _fail(self, where: str, e: Exception) -> None:
+        """Record a failed operation and keep going — one rejected item/trigger/
+        host (e.g. Zabbix refusing a value_type change on an item with history)
+        must not abort every other object still waiting to be reconciled."""
+        self.errors.append(f"{where}: {e}")
+        print(f"    ! FAILED {where}: {e}")
 
     def _templategroup(self, name: str) -> str:
         got = self.api.templategroup.get(filter={"name": [name]}, output=["groupid"])
@@ -41,15 +49,18 @@ class Provisioner:
         want = {"name": p.name, "value_type": p.value_type_code,
                 "units": p.units, "description": p.description()}
         got = existing.get(p.key)
-        if got is None:
-            self.api.item.create(hostid=template_id, key_=p.key, type=2, **want)
-            print(f"    + item {p.key}")
-            return
-        # The API returns everything as strings; compare in string space.
-        diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
-        if diff:
-            self.api.item.update(itemid=got["itemid"], **diff)
-            print(f"    ~ item {p.key} (updated: {', '.join(diff)})")
+        try:
+            if got is None:
+                self.api.item.create(hostid=template_id, key_=p.key, type=2, **want)
+                print(f"    + item {p.key}")
+                return
+            # The API returns everything as strings; compare in string space.
+            diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
+            if diff:
+                self.api.item.update(itemid=got["itemid"], **diff)
+                print(f"    ~ item {p.key} (updated: {', '.join(diff)})")
+        except Exception as e:  # noqa: BLE001
+            self._fail(f"item {p.key}", e)
 
     def _triggers(self, template_name: str, p: Parameter, existing: dict[str, dict]) -> None:
         for t in p.triggers:
@@ -57,71 +68,90 @@ class Provisioner:
             want = {"expression": f"{t.func}(/{template_name}/{p.key}){t.op}{t.value}",
                     "priority": SEVERITY_CODE[t.severity]}
             got = existing.get(desc)
-            if got is None:
-                self.api.trigger.create(description=desc, **want)
-                print(f"      ! trigger [{t.severity}] {t.label}")
-                continue
-            diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
-            if diff:
-                self.api.trigger.update(triggerid=got["triggerid"], **diff)
-                print(f"      ~ trigger [{t.severity}] {t.label} (updated: {', '.join(diff)})")
+            try:
+                if got is None:
+                    self.api.trigger.create(description=desc, **want)
+                    print(f"      ! trigger [{t.severity}] {t.label}")
+                    continue
+                diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
+                if diff:
+                    self.api.trigger.update(triggerid=got["triggerid"], **diff)
+                    print(f"      ~ trigger [{t.severity}] {t.label} (updated: {', '.join(diff)})")
+            except Exception as e:  # noqa: BLE001
+                self._fail(f"trigger '{desc}'", e)
 
     def _host(self, h, hg_id: str, template_id: str, existing: dict[str, str]) -> None:
         inv = h.inventory
-        if h.host in existing:
-            self.api.host.update(hostid=existing[h.host], name=h.name,
-                                 macros=[{"macro": k, "value": v} for k, v in h.macros.items()],
-                                 inventory_mode=0 if inv else -1, inventory=inv)
-            print(f"    ~ host {h.host} (data synced)")
-            return
-        self.api.host.create(
-            host=h.host, name=h.name,
-            groups=[{"groupid": hg_id}],
-            templates=[{"templateid": template_id}],
-            macros=[{"macro": k, "value": v} for k, v in h.macros.items()],
-            inventory_mode=0 if inv else -1, inventory=inv,
-        )
-        print(f"    + host {h.host} ({h.name})")
+        try:
+            if h.host in existing:
+                self.api.host.update(hostid=existing[h.host], name=h.name,
+                                     macros=[{"macro": k, "value": v} for k, v in h.macros.items()],
+                                     inventory_mode=0 if inv else -1, inventory=inv)
+                print(f"    ~ host {h.host} (data synced)")
+                return
+            self.api.host.create(
+                host=h.host, name=h.name,
+                groups=[{"groupid": hg_id}],
+                templates=[{"templateid": template_id}],
+                macros=[{"macro": k, "value": v} for k, v in h.macros.items()],
+                inventory_mode=0 if inv else -1, inventory=inv,
+            )
+            print(f"    + host {h.host} ({h.name})")
+        except Exception as e:  # noqa: BLE001
+            self._fail(f"host {h.host}", e)
 
     def ensure_geomap(self) -> None:
         """Make the Geomap widget work out-of-the-box over OpenStreetMap."""
-        self.api.settings.update(geomaps_tile_provider="OpenStreetMap.Mapnik")
-        print("Geomap tile provider set: OpenStreetMap.Mapnik")
+        try:
+            self.api.settings.update(geomaps_tile_provider="OpenStreetMap.Mapnik")
+            print("Geomap tile provider set: OpenStreetMap.Mapnik")
+        except Exception as e:  # noqa: BLE001 — cosmetic; must not block provisioning
+            self._fail("geomap tile provider", e)
 
     def prune(self, assets) -> None:
         """Delete catalog-managed hosts that no longer exist in the catalog.
         Scoped to the catalog's own host groups — never touches other hosts."""
-        catalog_hosts = {h.host for a in assets for h in a.hosts}
-        group_names = sorted({a.host_group for a in assets})
-        gids = [g["groupid"] for g in
-                self.api.hostgroup.get(filter={"name": group_names}, output=["groupid"])]
-        if not gids:
-            return
-        present = self.api.host.get(groupids=gids, output=["hostid", "host"])
-        stale = [h for h in present if h["host"] not in catalog_hosts]
-        if stale:
-            self.api.host.delete(*[h["hostid"] for h in stale])
-            for h in stale:
-                print(f"  - pruned stale host {h['host']}")
+        try:
+            catalog_hosts = {h.host for a in assets for h in a.hosts}
+            group_names = sorted({a.host_group for a in assets})
+            gids = [g["groupid"] for g in
+                    self.api.hostgroup.get(filter={"name": group_names}, output=["groupid"])]
+            if not gids:
+                return
+            present = self.api.host.get(groupids=gids, output=["hostid", "host"])
+            stale = [h for h in present if h["host"] not in catalog_hosts]
+            if stale:
+                self.api.host.delete(*[h["hostid"] for h in stale])
+                for h in stale:
+                    print(f"  - pruned stale host {h['host']}")
+        except Exception as e:  # noqa: BLE001 — best-effort cleanup, not critical path
+            self._fail("prune", e)
 
     def apply(self, asset: AssetClass) -> None:
         print(f"\n[{asset.asset_class}]")
-        tg_id = self._templategroup(asset.template_group)
-        hg_id = self._hostgroup(asset.host_group)
-        template_id = self._template(asset.template_name, tg_id)
-        print(f"  template '{asset.template_name}' ({len(asset.parameters)} params)")
+        try:
+            tg_id = self._templategroup(asset.template_group)
+            hg_id = self._hostgroup(asset.host_group)
+            template_id = self._template(asset.template_name, tg_id)
+            print(f"  template '{asset.template_name}' ({len(asset.parameters)} params)")
 
-        # One fetch per object kind, scoped to the template — the sets these
-        # feed avoid an N+1 storm of per-object existence checks.
-        items = {i["key_"]: i for i in self.api.item.get(
-            templateids=template_id,
-            output=["itemid", "key_", "name", "value_type", "units", "description"])}
-        triggers = {t["description"]: t for t in self.api.trigger.get(
-            templateids=template_id, expandExpression=True,
-            output=["triggerid", "description", "priority", "expression"])}
-        host_names = [h.host for h in asset.hosts]
-        hosts = {h["host"]: h["hostid"]
-                 for h in self.api.host.get(filter={"host": host_names}, output=["host", "hostid"])}
+            # One fetch per object kind, scoped to the template — the sets these
+            # feed avoid an N+1 storm of per-object existence checks.
+            items = {i["key_"]: i for i in self.api.item.get(
+                templateids=template_id,
+                output=["itemid", "key_", "name", "value_type", "units", "description"])}
+            triggers = {t["description"]: t for t in self.api.trigger.get(
+                templateids=template_id, expandExpression=True,
+                output=["triggerid", "description", "priority", "expression"])}
+            host_names = [h.host for h in asset.hosts]
+            hosts = {h["host"]: h["hostid"] for h in self.api.host.get(
+                filter={"host": host_names}, output=["host", "hostid"])}
+        except Exception as e:  # noqa: BLE001
+            # Without the containers/fetches above, nothing for this asset class
+            # can be reconciled meaningfully — skip it, but let the other asset
+            # classes (and the final prune) still run instead of aborting everything.
+            self._fail(f"{asset.asset_class} (setup)", e)
+            return
 
         for p in asset.parameters:
             self._item(template_id, p, items)
@@ -134,13 +164,19 @@ class Provisioner:
         want_descs = {f"{p.name}: {t.label}" for p in asset.parameters for t in p.triggers}
         for d, t in triggers.items():
             if d not in want_descs:
-                self.api.trigger.delete(t["triggerid"])
-                print(f"    - pruned stale trigger '{d}'")
+                try:
+                    self.api.trigger.delete(t["triggerid"])
+                    print(f"    - pruned stale trigger '{d}'")
+                except Exception as e:  # noqa: BLE001
+                    self._fail(f"prune trigger '{d}'", e)
         want_keys = {p.key for p in asset.parameters}
         for k, i in items.items():
             if k not in want_keys:
-                self.api.item.delete(i["itemid"])
-                print(f"    - pruned stale item {k}")
+                try:
+                    self.api.item.delete(i["itemid"])
+                    print(f"    - pruned stale item {k}")
+                except Exception as e:  # noqa: BLE001
+                    self._fail(f"prune item {k}", e)
 
         for h in asset.hosts:
             self._host(h, hg_id, template_id, hosts)
@@ -162,6 +198,12 @@ def main() -> None:
         prov.prune(assets)
     finally:
         prov.close()
+    if prov.errors:
+        print(f"\nProvisioning finished with {len(prov.errors)} error(s) — everything else "
+              f"still applied:")
+        for e in prov.errors:
+            print(f"  - {e}")
+        raise SystemExit(1)
     print("\nProvisioning complete. Now run:  make simulate")
 
 

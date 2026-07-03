@@ -13,8 +13,11 @@ environment wins over the file.
 
 ## Typed getters
 
-`_f(key, default)` reads a float setting and falls back to the default if the
-variable is missing or unparseable.
+`_f(key, default)` / `_i(key, default)` read a float/int setting and fall back
+to the default if the variable is missing or unparseable — every setting
+degrades this way, including `ZBX_SENDER_PORT`, so a typo in one variable
+can't crash a command that never uses it (`list`/`check`/`config` are fully
+offline and never dial the sender port at all).
 
 ## Settings groups
 

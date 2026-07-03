@@ -31,12 +31,21 @@ def _f(key: str, default: float) -> float:
         return default
 
 
+def _i(key: str, default: int) -> int:
+    try:
+        return int(os.environ.get(key, default))
+    except ValueError:
+        return default
+
+
 API_URL = os.environ.get("ZBX_API_URL", "http://127.0.0.1:8080")
 API_USER = os.environ.get("ZBX_API_USER", "Admin")
 API_PASSWORD = os.environ.get("ZBX_API_PASSWORD", "zabbix")
 
 SENDER_HOST = os.environ.get("ZBX_SENDER_HOST", "127.0.0.1")
-SENDER_PORT = int(os.environ.get("ZBX_SENDER_PORT", "10051"))
+# Falls back like every other setting: `list`/`check`/`config` never dial this
+# port, so a typo in it must not crash offline commands that don't need it.
+SENDER_PORT = _i("ZBX_SENDER_PORT", 10051)
 
 STICKINESS = _f("SIM_STICKINESS", 0.92)
 TIME_SCALE = _f("SIM_TIME_SCALE", 10.0)

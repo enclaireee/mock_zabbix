@@ -284,6 +284,57 @@ def test_catalog_guards():
         pass
 
 
+def test_provision_isolates_object_failures():
+    """One item/trigger/host that the Zabbix API rejects (e.g. a value_type
+    change on an item with history) must be recorded, not raised — otherwise a
+    single bad object aborts reconciliation of everything still queued behind
+    it. _item/_triggers/_host must never propagate; they log to .errors."""
+    from otobs.provision import Provisioner
+    from otobs.catalog import Parameter, Sim, State, Host, Trigger
+
+    class _NS:
+        def __init__(self, fail=False):
+            self.fail = fail
+            self.calls = 0
+
+        def create(self, **_kw):
+            self.calls += 1
+            if self.fail:
+                raise RuntimeError("rejected by server")
+
+        def update(self, **_kw):
+            self.calls += 1
+            if self.fail:
+                raise RuntimeError("rejected by server")
+
+    class _FakeAPI:
+        def __init__(self, fail=False):
+            self.item = _NS(fail)
+            self.trigger = _NS(fail)
+            self.host = _NS(fail)
+            self.settings = _NS(fail)
+
+    def param(key):
+        sim = Sim("numeric", [State(0.9, "good", None, 0, 1, 0)])
+        trig = [Trigger(">=", 1, "warning", "l")]
+        return Parameter(key, key, "float", "", "1m", "c", "col", "fm", "src", sim, trig)
+
+    prov = Provisioner.__new__(Provisioner)  # skip __init__: no real API login
+    prov.api = _FakeAPI(fail=True)
+    prov.errors = []
+    prov._item("tmpl", param("k"), {})
+    prov._triggers("Template X", param("k"), {})
+    prov._host(Host("H", "H"), "hg", "tmpl", {})
+    prov.ensure_geomap()
+    assert len(prov.errors) == 4, f"expected 4 recorded failures, got {prov.errors}"
+    # And the success path still records nothing.
+    prov2 = Provisioner.__new__(Provisioner)
+    prov2.api = _FakeAPI(fail=False)
+    prov2.errors = []
+    prov2._item("tmpl", param("k"), {})
+    assert prov2.errors == [] and prov2.api.item.calls == 1
+
+
 def test_fmt_eta():
     assert _fmt_eta(0) == "00:00"
     assert _fmt_eta(5) == "00:05"
