@@ -36,7 +36,9 @@ parameters:
       underperform: [22, 27.5]
       failed: [15, 21]
       weights: [good, underperform, failed]
-      jitter: 0.3
+      # 4-20mA PT tick noise: ±0.25% of a 40 barg span ≈ 0.1 bar; plus small line
+      # breathing. 0.3 made a regulated header jump like a compressor knock.
+      jitter: 0.08
     triggers:
       - { op: "<=", value: 27, severity: warning, label: "Inlet pressure low" }
       - { op: "<=", value: 20, severity: high,    label: "Inlet pressure LOW-LOW — supply integrity" }
@@ -58,7 +60,9 @@ parameters:
       underperform: [9, 10.9]
       failed: [6, 8.5]
       weights: [good, underperform, failed]
-      jitter: 0.2
+      # Actively regulated to the setpoint: tick movement is regulator hunting
+      # inside the deadband (~0.05 bar), not free process noise.
+      jitter: 0.05
     triggers:
       - { op: "<=", value: 10, severity: warning, label: "Outlet pressure below setpoint" }
       - { op: "<=", value: 8,  severity: high,    label: "Outlet pressure LOW-LOW — customer supply risk" }
@@ -100,7 +104,9 @@ parameters:
       underperform: [2, 7.9]
       failed: [0, 1.9]
       weights: [good, underperform, failed]
-      jitter: 0.6
+      # USM repeatability ~0.2%; short-term demand ripple ~1-2% of mid-flow
+      # dominates. Slow demand swing itself is the time_of_day cycle, not jitter.
+      jitter: 0.3
     triggers:
       - { op: "<=", value: 7, severity: warning, label: "Flow below normal range" }
       - { op: "<=", value: 1, severity: high,    label: "No flow — supply interruption" }
@@ -120,7 +126,9 @@ parameters:
       underperform: [3, 11]
       failed: [-8, 2]
       weights: [good, underperform, failed]
-      jitter: 0.5
+      # Class-A RTD noise ±0.15°C; flowing gas + pipe steel give minutes of
+      # thermal inertia, so 10s tick movement is small.
+      jitter: 0.2
     triggers:
       - { op: "<=", value: 5, severity: warning, label: "Gas temp low — hydrate risk" }
       - { op: "<=", value: 0, severity: high,    label: "Gas temp freezing — hydrate/ice formation" }
@@ -140,7 +148,9 @@ parameters:
       underperform: [40, 51]
       failed: [25, 39]
       weights: [good, underperform, failed]
-      jitter: 0.8
+      # A water bath has hours of thermal mass; burner on/off cycling shows as a
+      # slow ripple, not per-tick jumps.
+      jitter: 0.3
     triggers:
       - { op: "<=", value: 48, severity: warning, label: "Heater outlet temp low" }
       - { op: "<=", value: 40, severity: high,    label: "Heater failure — downstream hydrate risk" }
@@ -161,7 +171,9 @@ parameters:
       underperform: [33, 36.9]
       failed: [29, 32.9]
       weights: [good, underperform, failed]
-      jitter: 0.3
+      # GC repeatability ~0.1% (±0.04 MJ); blend composition drifts slowly, so
+      # minute-to-minute movement stays well under 0.2 MJ.
+      jitter: 0.15
     triggers:
       - { op: "<=", value: 36, severity: warning, label: "Heating value below spec" }
       - { op: "<=", value: 33, severity: high,    label: "Off-spec gas — custody/billing impact" }
@@ -382,7 +394,9 @@ parameters:
       underperform: [76, 95]
       failed: [96, 120]
       weights: [good, underperform, failed]
-      jitter: 0.8
+      # Bearing metal + oil film smooth the signal: healthy tick noise well
+      # under 1°C. Fast rises on lube loss come from the trend ramp, not jitter.
+      jitter: 0.3
     triggers:
       - { op: ">=", value: 80,  severity: warning, label: "Bearing temperature high" }
       - { op: ">=", value: 100, severity: high,    label: "Bearing temperature TRIP" }

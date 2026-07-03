@@ -40,7 +40,9 @@ correlation:
       affects:
         - { param: "hmi.cpu.util", bias_band: "underperform", strength: 0.6 }
 
-# Long ramps everywhere -> smooth degradation slopes rather than steps.
+# Long ramps everywhere -> smooth degradation slopes rather than steps. These are
+# deliberately SLOWER than the physical event (cf. realistic.yml's 900-1200s
+# thermal ramps): an RUL model needs a learnable slope, not a near-step.
 trend:
   enabled: true
   ramp_seconds: 7200

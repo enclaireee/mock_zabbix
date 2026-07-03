@@ -23,6 +23,8 @@ continuity:
 
 # Daily demand cycle. With continuity on, this shifts the setpoint the value is held
 # to (rather than scaling the raw sample). Peak hours in local time (settings.TIMEZONE).
+# Gas-for-power demand tracks the grid: lowest pre-dawn (~05:00), high through the
+# working day into the Java-Bali evening peak — hence the wide 06-22 peak window.
 time_of_day:
   enabled: true
   profiles:
@@ -79,19 +81,30 @@ correlation:
       affects:
         - { param: "plc.diag.event_rate", bias_band: "underperform", strength: 0.6 }
 
-# Transitions ramp (÷ SIM_TIME_SCALE) instead of stepping; thermal/wear params slowest.
+# Transitions ramp (÷ SIM_TIME_SCALE) instead of stepping. Ramp lengths follow the
+# physical event, not a house style:
+#   hmi.cpu.temp 1200s      — a chassis without forced airflow reaches thermal
+#                             steady-state in ~15-20 min (equilibrium ≈1000s under
+#                             sustained load in thermal-throttling studies)
+#   proc.comp.bearing_temp 900s — lube starvation cooks a journal bearing in
+#                             minutes; real trains trip on it in 5-15 min
+#   proc.comp.vibration 600s — vibration follows bearing damage almost immediately
+#                             (ISO 10816 zone changes are step-like)
+#   proc.temp.gas 2400s     — pipe steel + flowing gas: tens of minutes of inertia
+#   hmi.smart.realloc_sectors 7200s — media degradation accumulates over hours+
 # After a ramp finishes, continuity's controlled walk takes over inside the new band.
 trend:
   enabled: true
   ramp_seconds: 1800
   overrides:
-    hmi.cpu.temp:              { ramp_seconds: 3600 }
-    proc.comp.bearing_temp:    { ramp_seconds: 3600 }
-    proc.comp.vibration:       { ramp_seconds: 2400 }
+    hmi.cpu.temp:              { ramp_seconds: 1200 }
+    proc.comp.bearing_temp:    { ramp_seconds: 900 }
+    proc.comp.vibration:       { ramp_seconds: 600 }
     proc.temp.gas:             { ramp_seconds: 2400 }
     hmi.smart.realloc_sectors: { ramp_seconds: 7200 }
 
-# ~2% of due sends dropped, so real gaps form and nodata() triggers fire.
+# ~2% of due sends dropped: real SCADA field links lose the odd reading to comms
+# retries and historian deadband gaps; a few percent is the plausible field rate.
 dropout:
   enabled: true
   probability: 0.02

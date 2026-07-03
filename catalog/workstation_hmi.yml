@@ -71,7 +71,9 @@ parameters:
       underperform: [5, 20]
       failed: [0, 5]
       weights: [good, underperform, failed]
-      jitter: 1
+      # Free-disk % moves by log growth/rotation — fractions of a percent per
+      # 5m sample, not whole percents.
+      jitter: 0.2
     triggers:
       - { op: "<=", value: 20, severity: warning, label: "Disk filling — temp cleanup started" }
       - { op: "<=", value: 5,  severity: high,    label: "Disk full — cannot write logs/pagefile" }

@@ -28,12 +28,14 @@ correlation:
       affects:
         - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 0.6 }
 
+# Ramp timing follows the physical event (same rationale as realistic.yml):
+# enclosure heat-up ~20 min, bearing cook-off ~15 min.
 trend:
   enabled: true
   ramp_seconds: 2400
   overrides:
-    hmi.cpu.temp:           { ramp_seconds: 3600 }
-    proc.comp.bearing_temp: { ramp_seconds: 3600 }
+    hmi.cpu.temp:           { ramp_seconds: 1200 }
+    proc.comp.bearing_temp: { ramp_seconds: 900 }
 
 dropout:  { enabled: false }
 backfill: { enabled: false, days: 14, speed_multiplier: 1000 }
