@@ -97,10 +97,8 @@ class TodProfile:
         s, e = self.peak_start, self.peak_end
         span = (e - s) % 24
         if span == 0:
-            # e == s: empty window (always off-peak); s..s+24: all-day peak.
             return self.peak_multiplier if e != s else self.off_peak_multiplier
         a = (hour - s) % 24
-        # Signed depth to the nearest window edge: + inside, - outside.
         depth = min(a, span - a) if a < span else -min(24 - a, a - span)
         if self.shoulder_hours <= 0:
             p = 1.0 if depth >= 0 else 0.0
@@ -198,15 +196,13 @@ def _tod(raw: dict) -> TimeOfDay:
         ph = p.get("peak_hours", [0, 0])
         if not (isinstance(ph, list) and len(ph) == 2):
             raise ValueError(f"{where}.peak_hours must be [start, end]")
-        # Floats, not ints: a shoulder can be centred on a half-hour edge
-        # (e.g. a 07:30 shift start), and multiplier() is float-safe throughout.
         start, end = float(ph[0]), float(ph[1])
         for h in (start, end):
             if not 0 <= h <= 24:
                 raise ValueError(f"{where}.peak_hours hour out of range 0..24: {h}")
         shoulder = _num(p, "shoulder_hours", 2.0, where, 0.0, 12.0)
         span = (end - start) % 24
-        if 0 < span < 24:  # 0 and 24 are the all-day/empty special cases (no shoulder)
+        if 0 < span < 24:
             limit = min(span, 24 - span)
             if shoulder > limit:
                 raise ValueError(

@@ -391,6 +391,51 @@ addresses items by bare key, so a cross-file collision would silently shadow
 one parameter). `load_all()` is the single entry point both consumers share:
 it loads `sites.yml`, then every `*.yml` except `sites.yml`/`sim_config.yml`.
 
+### 3.7 `discovery` — simulated Low-Level Discovery (only the switch)
+
+Four of the switch's five parameters are **per-port**: a switch has many
+interfaces, not one. Rather than hand-write five items × N ports, the switch
+catalog carries an optional `discovery:` block that turns selected params into
+**item/trigger prototypes** under a Zabbix Low-Level Discovery (LLD) rule — the
+native mechanism that auto-creates one item per discovered instance (port, disk,
+core).
+
+```yaml
+discovery:
+  key: "net.if.discovery"          # the LLD rule's trapper key
+  name: "Interface discovery (IF-MIB, LLD)"
+  macro: "{#IFNAME}"               # LLD macro (default {#IFNAME})
+  prototypes: ["net.if.oper_status", "net.if.admin_status",
+               "net.if.error_rate", "net.if.discards"]   # which params are per-port
+  ports: ["Gi1/0/1", …, "Gi1/0/8"]                        # the simulated walk result
+```
+
+**Technical honesty — this is a lab simulation of SNMP LLD, not a real SNMP
+poll.** In production a switch is SNMP-walked (IF-MIB `ifDescr`/`ifIndex`) to
+enumerate its interfaces; that walk *is* natively collectable (§ architecture,
+"Switch/Router: everything"). Here there is no physical switch, so — exactly like
+every other value in this lab — the port list is **pushed via trapper**: the
+simulator sends `net.if.discovery` a `{"data":[{"{#IFNAME}":"Gi1/0/1"}, …]}`
+payload and the server materializes one item per port from each prototype. Swap
+the item type Trapper→SNMP and this same catalog block becomes a real IF-MIB
+discovery with no other change.
+
+Design points:
+
+- `prototypes` lists **existing parameter keys** (from §3.3). A listed param
+  becomes an item prototype keyed `<key>[{#IFNAME}]`, and each of its triggers
+  becomes a trigger prototype — reusing that param's `sim`, `value_type`, and
+  thresholds verbatim. One definition drives every port; the simulator runs one
+  independent Good/Underperform/Failed machine per (host, port), so port 3 can be
+  degrading while ports 1–8 stay clean. All the §5.3 realism features key off the
+  **base** param key, so a single `sim_config` entry covers every port.
+- Any param **not** listed stays a flat per-host item — `net.env.fan_state` is
+  chassis-level (one fan tray, not per-port), so it deliberately stays flat.
+- Validation is load-time and as strict as everything else in §3.6: missing
+  fields, an empty or duplicate `ports` list, a `prototypes` entry that isn't a
+  real param key, a `macro` not shaped `{#…}`, or a `key` colliding with a param
+  key all raise at load.
+
 ---
 
 ## 4. Provisioning, in depth
@@ -438,6 +483,16 @@ For each of the four asset classes:
    links are set at creation and not re-synced — re-linking is destructive in
    Zabbix (unlink-and-clear deletes item history) and the template's identity
    hasn't changed if the catalog's `template_name` hasn't.
+
+If the asset class has a `discovery:` block (§3.7), its **prototype** params are
+routed through `_discovery()` instead of the flat item path: get-or-create the
+LLD rule (`discoveryrule`, type 2 = trapper), then create/diff/prune item
+prototypes (`<key>[{#IFNAME}]`) and trigger prototypes exactly like the flat
+`item`/`trigger` reconcile — same identity keys (prototype `key_`, trigger
+`description`), same "one bad object doesn't abort the run" wrapping (§4.3.1).
+Flat params (`fan_state`) are untouched by this path. Migrating a param from flat
+to prototype is a delete-of-the-flat-item + create-of-the-prototype (identity
+change), same rename-is-not-a-rename semantics as §4.4.
 
 ### 4.3 Global steps
 

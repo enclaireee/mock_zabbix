@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG_DIR = ROOT / "catalog"
-PRESETS_DIR = ROOT / "presets"        # sim-config mode templates (`make config`)
+PRESETS_DIR = ROOT / "presets"
 
 
 def _load_env() -> None:
@@ -43,12 +43,9 @@ API_USER = os.environ.get("ZBX_API_USER", "Admin")
 API_PASSWORD = os.environ.get("ZBX_API_PASSWORD", "zabbix")
 
 SENDER_HOST = os.environ.get("ZBX_SENDER_HOST", "127.0.0.1")
-# Falls back like every other setting: `list`/`check`/`config` never dial this
-# port, so a typo in it must not crash offline commands that don't need it.
 SENDER_PORT = _i("ZBX_SENDER_PORT", 10051)
 
 STICKINESS = _f("SIM_STICKINESS", 0.92)
 TIME_SCALE = _f("SIM_TIME_SCALE", 10.0)
 
-# Local timezone for the time_of_day sim feature (reuses the stack's tz var).
 TIMEZONE = os.environ.get("ZBX_TIMEZONE", "UTC")

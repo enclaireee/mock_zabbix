@@ -10,6 +10,7 @@ time-of-day, dropout, backfill). Every feature defaults OFF and is a strict no-o
 when disabled: with all of them off, output is identical to the plain state machine.
 """
 from __future__ import annotations
+import json
 import random
 import time
 from dataclasses import dataclass
@@ -19,10 +20,10 @@ from . import settings
 from .catalog import AssetClass, Parameter, Sim, State, load_all
 from .sim_config import SimConfig, load_sim_config
 
-try:  # stdlib since 3.9; fall back to system-local time if tzdata is missing.
+try:
     from zoneinfo import ZoneInfo
     _TZ = ZoneInfo(settings.TIMEZONE)
-except Exception:  # noqa: BLE001
+except Exception:
     _TZ = None
 
 
@@ -33,12 +34,17 @@ def _hour(unix_ts: float) -> float:
     return t.hour + t.minute / 60.0
 
 
-def sample(sim: Sim, state: State, value_type: str = "float"):
+def _clamp_units(v: float, units: str) -> float:
+    return max(0.0, min(100.0, v)) if units == "%" else v
+
+
+def sample(sim: Sim, state: State, value_type: str = "float", units: str = ""):
     """Produce one reading for the given state, typed for the Zabbix item."""
     if sim.kind == "enum":
         return state.value
     v = random.uniform(state.lo, state.hi) + random.gauss(0, state.jitter)
     v = max(state.lo - state.jitter, min(state.hi + state.jitter, v))
+    v = _clamp_units(v, units)
     return int(round(v)) if value_type == "unsigned" else round(v, 3)
 
 
@@ -56,40 +62,31 @@ def sample_stream(s: "Stream", st: State, now: float, scale: float,
     ramp_dur = cfg.trend.ramp_for(s.param.key) / scale if cfg.trend.enabled else 0.0
     ramping = (cfg.trend.enabled and s.ramp_to is not None
                and ramp_dur > 0 and (now - s.ramp_start) < ramp_dur)
-    # Walk from the last value only while staying inside the current band (steady
-    # state). A transition lands the value in the new band via a fresh draw (or a
-    # ramp, if trend is on), then the walk takes over on the next tick.
     walk = (cfg.continuity.enabled and not ramping
             and s.last_value is not None and st.lo <= s.last_value <= st.hi)
     mult = cfg.time_of_day.multiplier(s.param.key, hour)
     if not ramping and not walk and mult == 1.0:
-        return sample(sim, st, s.param.value_type)  # identical draws to legacy path
+        return sample(sim, st, s.param.value_type, s.param.units)
     if walk:
         if st.jitter > 0:
-            # PID-controlled analog signal: mean-revert toward a setpoint (band
-            # centre, shifted by any time-of-day multiplier) with proportional
-            # noise on top. Reversion keeps it hovering at setpoint like a real
-            # control loop instead of random-walking to a rail; time_of_day thus
-            # composes here (moves the setpoint) rather than being shadowed.
             target = ((st.lo + st.hi) / 2.0) * mult
             base = (s.last_value + cfg.continuity.reversion * (target - s.last_value)
                     + random.gauss(0, cfg.continuity.step(st.jitter)))
         else:
-            base = s.last_value  # counter/gauge: holds until an actual state change
+            base = s.last_value
         return _typed(min(st.hi, max(st.lo, base)), s.param.value_type)
     if ramping:
         frac = (now - s.ramp_start) / ramp_dur
         base = s.ramp_from + (s.ramp_to - s.ramp_from) * frac
     else:
         base = random.uniform(st.lo, st.hi)
-    # Ramp/time-of-day deliberately traverse or shift out of band — no band clamp here.
-    v = base * mult + random.gauss(0, st.jitter)
+    v = _clamp_units(base * mult + random.gauss(0, st.jitter), s.param.units)
     return _typed(v, s.param.value_type)
 
 
 def next_state(sim: Sim, cur: int | None, stickiness: float,
                forced_idx: int | None = None) -> int:
-    if forced_idx is not None:  # correlation force overrides stickiness + weights
+    if forced_idx is not None:
         return forced_idx
     if cur is not None and random.random() < stickiness:
         return cur
@@ -119,15 +116,45 @@ class Stream:
     ramp_from: float = 0.0
     ramp_to: float | None = None
     ramp_start: float = 0.0
+    send_key: str = ""  # trapper key actually sent; per-port streams append [<port>]
+
+    def __post_init__(self):
+        if not self.send_key:
+            self.send_key = self.param.key
 
 
 def build_streams(assets: list[AssetClass]) -> list[Stream]:
+    """One stream per (host, param). Discovery-prototype params fan out to one
+    stream per port, each reusing the *base* Parameter — so a port's Good/
+    Underperform/Failed machine and every sim_config feature key off the base key,
+    while only the trapper `send_key` carries the [<port>] suffix."""
     streams = []
     for a in assets:
+        disc = a.discovery
+        protos = set(disc.prototypes) if disc else set()
         for h in a.hosts:
             for p in a.parameters:
-                streams.append(Stream(host=h.host, param=p))
+                if disc and p.key in protos:
+                    for port in disc.ports:
+                        streams.append(Stream(host=h.host, param=p,
+                                              send_key=f"{p.key}[{port}]"))
+                else:
+                    streams.append(Stream(host=h.host, param=p))
     return streams
+
+
+def discovery_payloads(assets: list[AssetClass]) -> list[tuple[str, str, str]]:
+    """(host, lld_key, json) trapper LLD traps seeding the server's per-port items
+    before any port value arrives. Lab stand-in for a real SNMP interface walk."""
+    out = []
+    for a in assets:
+        d = a.discovery
+        if not d:
+            continue
+        payload = json.dumps({"data": [{d.macro: port} for port in d.ports]})
+        for h in a.hosts:
+            out.append((h.host, d.key, payload))
+    return out
 
 
 def _by_host(streams: list[Stream]) -> dict[str, dict[str, Stream]]:
@@ -165,7 +192,7 @@ def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
     """Advance one due stream one tick. Returns the emitted value, or None if the
     reading was dropped. Shared by live run() and backfill(). Caller owns next_due."""
     if cfg.dropout.enabled and random.random() < cfg.dropout.prob_for(s.param.key):
-        return None  # missed reading: state frozen, no emit (exercises nodata())
+        return None
     fb = forced.get((s.host, s.param.key))
     forced_idx = _idx_of_band(s.param.sim, fb) if fb is not None else None
     new_idx = next_state(s.param.sim, s.state_idx, settings.STICKINESS, forced_idx)
@@ -184,11 +211,11 @@ def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
 
 def _note(s: Stream, value) -> str | None:
     st = s.param.sim.states[s.state_idx]
-    return f"{s.host}/{s.param.key}={value}({st.band})" if st.band != "good" else None
+    return f"{s.host}/{s.send_key}={value}({st.band})" if st.band != "good" else None
 
 
 def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
-    from zabbix_utils import ItemValue, Sender  # lazy: keeps `check`/`list` offline
+    from zabbix_utils import ItemValue, Sender
 
     cfg = cfg or load_sim_config()
     streams = build_streams(assets)
@@ -200,10 +227,19 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
           f"(stickiness={settings.STICKINESS}, time_scale={scale}x, sim-config: {feats}). "
           f"Ctrl+C to stop.")
 
+    lld = discovery_payloads(assets)
+    if lld:
+        try:
+            sender.send([ItemValue(h, k, v) for h, k, v in lld])
+            print(f"Sent {len(lld)} LLD discovery payload(s) — per-port items appear "
+                  f"once the server processes the trap (a few seconds).")
+        except Exception as e:  # noqa: BLE001
+            print(f"discovery send error: {e}")
+
     while True:
         now = time.monotonic()
         due = [s for s in streams if s.next_due <= now]
-        if not due:  # idle tick: no hour lookup, no correlation rolls
+        if not due:
             time.sleep(0.5)
             continue
         hour = _hour(time.time()) if cfg.time_of_day.enabled else 0.0
@@ -214,7 +250,7 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
             value = process_stream(s, now, scale, cfg, forced, hour)
             if value is None:
                 continue
-            batch.append(ItemValue(s.host, s.param.key, str(value)))
+            batch.append(ItemValue(s.host, s.send_key, str(value)))
             n = _note(s, value)
             if n:
                 notes.append(n)
@@ -275,8 +311,6 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     start = end - days * 86400.0
     span = max(end - start, 1e-9)
 
-    # Scheduling is per interval bucket (group_due); Stream.next_due is only
-    # used by the live loop and stays untouched here.
     groups: dict[int, list[Stream]] = {}
     for s in streams:
         groups.setdefault(s.param.interval_s, []).append(s)
@@ -285,7 +319,14 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     print(f"Backfilling {days:g}d for {len(streams)} items at {speed:g}x "
           f"-> {settings.SENDER_HOST}:{settings.SENDER_PORT} ...")
 
-    FLUSH = 500  # ponytail: fixed batch size; raise if the trapper backpressures.
+    lld = discovery_payloads(assets)
+    if lld:
+        try:  # seed discovery at the window start so per-port items exist first
+            sender.send([ItemValue(h, k, v, clock=int(start)) for h, k, v in lld])
+        except Exception as e:  # noqa: BLE001
+            print(f"discovery send error: {e}")
+
+    FLUSH = 500
     batch, sent = [], 0
     wall_start = last_print = time.time()
 
@@ -301,33 +342,29 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
         batch.clear()
 
     vt = start
-    sleep_debt = 0.0  # accumulate tiny per-event pauses; see below
+    sleep_debt = 0.0
     while group_due and vt < end:
         hour = _hour(vt) if cfg.time_of_day.enabled else 0.0
         forced = correlation_forces(cfg, by_host)
         for iv, due_t in group_due.items():
             if due_t > vt:
                 continue
-            group_due[iv] = due_t + iv  # real interval -> correct historical spacing
+            group_due[iv] = due_t + iv
             for s in groups[iv]:
                 value = process_stream(s, vt, 1.0, cfg, forced, hour)
                 if value is not None:
-                    batch.append(ItemValue(s.host, s.param.key, str(value), clock=int(vt)))
+                    batch.append(ItemValue(s.host, s.send_key, str(value), clock=int(vt)))
                     if len(batch) >= FLUSH:
                         flush()
 
         prev = vt
-        vt = min(group_due.values())  # next tick -- also drives the while-check above
+        vt = min(group_due.values())
         now = time.time()
-        if now - last_print >= 0.2 or vt >= end:  # throttled: no terminal spam
+        if now - last_print >= 0.2 or vt >= end:
             frac = min((prev - start) / span, 1.0)
             eta = (now - wall_start) * (1 - frac) / frac if frac > 0 else 0.0
             _print_progress(frac, eta, sent)
             last_print = now
-        # Pace wall time without a syscall per event: at high SPEED the owed
-        # pause per tick is microseconds, but sleep() granularity is ~1ms+, so
-        # sleeping every tick runs far below the requested speed. Bank the debt
-        # and sleep only once it's noticeable (capped, as before, at 5s).
         sleep_debt += (vt - prev) / speed
         if sleep_debt >= 0.005:
             time.sleep(min(sleep_debt, 5.0))
@@ -344,7 +381,7 @@ def main() -> None:
     try:
         run(load_all())
     except KeyboardInterrupt:
-        print("\nstopped.")
+        print("\nKeyboard Interrupted, Thanks For Simulating.")
 
 
 if __name__ == "__main__":

@@ -50,13 +50,15 @@ def cmd_check() -> None:
                 idx = next_state(p.sim, idx, stickiness=settings.STICKINESS)
                 st = p.sim.states[idx]
                 seen_bands.add(st.band)
-                v = sample(p.sim, st, p.value_type)
+                v = sample(p.sim, st, p.value_type, p.units)
                 if p.sim.kind == "numeric":
                     assert isinstance(v, (int, float)), f"{p.key}: non-numeric {v!r}"
                     if p.value_type == "unsigned":
                         assert isinstance(v, int), f"{p.key}: unsigned got float {v!r}"
                     assert st.lo - 5 * st.jitter - 0.501 <= v <= st.hi + 5 * st.jitter + 0.501, \
                         f"{p.key}: {v} out of band [{st.lo},{st.hi}]"
+                    if p.units == "%":
+                        assert 0 <= v <= 100, f"{p.key}: {v}% outside physical 0-100% range"
                 else:
                     assert v == st.value, f"{p.key}: enum value mismatch"
                 n += 1
@@ -69,7 +71,6 @@ def cmd_check() -> None:
                 assert t.severity and t.op
 
     cfg = load_sim_config()
-    # loud fail on a typo'd param key / band, or dead config on an enum param
     validate(cfg, _param_bands(assets), _numeric_keys(assets))
     print(f"OK — {sum(len(a.parameters) for a in assets)} parameters across "
           f"{len(assets)} asset classes, {n} samples generated, all in-band.")
@@ -99,7 +100,7 @@ def cmd_config(rest: list[str]) -> None:
     active = settings.CATALOG_DIR / SIM_CONFIG_FILE
     names = [p.stem for p in presets]
 
-    if not rest:  # status view
+    if not rest:
         print(f"Active mode: {_active_mode(active, presets)}")
         feats = load_sim_config().enabled_features()
         print(f"  enabled features: {', '.join(feats) if feats else 'none (baseline)'}")
@@ -119,7 +120,6 @@ def cmd_config(rest: list[str]) -> None:
             print(f"unknown mode {rest[0]!r}. Available: {', '.join(names)}"); sys.exit(2)
 
     assets = load_all()
-    # loud fail before we activate it (typos AND dead enum-param config)
     validate(load_sim_config_file(src), _param_bands(assets), _numeric_keys(assets))
     active.write_text(src.read_text())
     feats = load_sim_config().enabled_features()
@@ -138,8 +138,6 @@ def _flag(name: str, cast):
 
 
 def main() -> None:
-    # provision/simulate/backfill are lazy-imported so list/check/config stay
-    # offline (no zabbix_utils needed).
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if arg == "provision":
         from .provision import main as m; m()

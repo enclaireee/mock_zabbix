@@ -54,7 +54,6 @@ class Provisioner:
                 self.api.item.create(hostid=template_id, key_=p.key, type=2, **want)
                 print(f"    + item {p.key}")
                 return
-            # The API returns everything as strings; compare in string space.
             diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
             if diff:
                 self.api.item.update(itemid=got["itemid"], **diff)
@@ -79,6 +78,93 @@ class Provisioner:
                     print(f"      ~ trigger [{t.severity}] {t.label} (updated: {', '.join(diff)})")
             except Exception as e:  # noqa: BLE001
                 self._fail(f"trigger '{desc}'", e)
+
+    def _discovery(self, template_id: str, template_name: str, disc,
+                   protos: list[Parameter]) -> None:
+        """Reconcile an LLD rule + its item/trigger prototypes, parallel to the flat
+        _item/_triggers path. Trapper LLD (type 2): the simulator feeds disc.key a
+        {#IFNAME} list and the server materializes one item per port from each
+        prototype. Idempotent — get-or-create the rule, diff prototypes, prune strays."""
+        try:
+            got = self.api.discoveryrule.get(templateids=template_id,
+                filter={"key_": disc.key}, output=["itemid", "key_", "name"])
+            if got:
+                lld_id = got[0]["itemid"]
+                if str(got[0]["name"]) != disc.name:
+                    self.api.discoveryrule.update(itemid=lld_id, name=disc.name)
+                    print(f"    ~ LLD rule {disc.key} (name)")
+            else:
+                lld_id = self.api.discoveryrule.create(
+                    hostid=template_id, name=disc.name, key_=disc.key, type=2)["itemids"][0]
+                print(f"    + LLD rule {disc.key}")
+        except Exception as e:  # noqa: BLE001
+            self._fail(f"LLD rule {disc.key}", e)
+            return
+
+        existing = {i["key_"]: i for i in self.api.itemprototype.get(
+            discoveryids=lld_id,
+            output=["itemid", "key_", "name", "value_type", "units", "description"])}
+        want_keys = set()
+        for p in protos:
+            pkey = f"{p.key}[{disc.macro}]"
+            want_keys.add(pkey)
+            want = {"name": f"{p.name} {disc.macro}", "value_type": p.value_type_code,
+                    "units": p.units, "description": p.description()}
+            g = existing.get(pkey)
+            try:
+                if g is None:
+                    self.api.itemprototype.create(hostid=template_id, ruleid=lld_id,
+                        key_=pkey, type=2, **want)
+                    print(f"    + item prototype {pkey}")
+                else:
+                    diff = {k: v for k, v in want.items() if str(g[k]) != str(v)}
+                    if diff:
+                        self.api.itemprototype.update(itemid=g["itemid"], **diff)
+                        print(f"    ~ item prototype {pkey} (updated: {', '.join(diff)})")
+            except Exception as e:  # noqa: BLE001
+                self._fail(f"item prototype {pkey}", e)
+
+        existing_tp = {t["description"]: t for t in self.api.triggerprototype.get(
+            discoveryids=lld_id, expandExpression=True,
+            output=["triggerid", "description", "priority", "expression"])}
+        want_descs = set()
+        for p in protos:
+            pkey = f"{p.key}[{disc.macro}]"
+            for t in p.triggers:
+                desc = f"{p.name} {disc.macro}: {t.label}"
+                want_descs.add(desc)
+                want = {"expression": f"{t.func}(/{template_name}/{pkey}){t.op}{t.value}",
+                        "priority": SEVERITY_CODE[t.severity]}
+                g = existing_tp.get(desc)
+                try:
+                    if g is None:
+                        self.api.triggerprototype.create(description=desc, **want)
+                        print(f"      ! trigger prototype [{t.severity}] {t.label}")
+                    else:
+                        diff = {k: v for k, v in want.items() if str(g[k]) != str(v)}
+                        if diff:
+                            self.api.triggerprototype.update(triggerid=g["triggerid"], **diff)
+                            print(f"      ~ trigger prototype [{t.severity}] {t.label} "
+                                  f"(updated: {', '.join(diff)})")
+                except Exception as e:  # noqa: BLE001
+                    self._fail(f"trigger prototype '{desc}'", e)
+
+        # Prune strays — trigger prototypes first (deleting an item prototype
+        # cascades to its triggers, same rule as the flat path).
+        for d, t in existing_tp.items():
+            if d not in want_descs:
+                try:
+                    self.api.triggerprototype.delete(t["triggerid"])
+                    print(f"      - pruned stale trigger prototype '{d}'")
+                except Exception as e:  # noqa: BLE001
+                    self._fail(f"prune trigger prototype '{d}'", e)
+        for k, i in existing.items():
+            if k not in want_keys:
+                try:
+                    self.api.itemprototype.delete(i["itemid"])
+                    print(f"    - pruned stale item prototype {k}")
+                except Exception as e:  # noqa: BLE001
+                    self._fail(f"prune item prototype {k}", e)
 
     def _host(self, h, hg_id: str, template_id: str, existing: dict[str, str]) -> None:
         inv = h.inventory
@@ -105,7 +191,7 @@ class Provisioner:
         try:
             self.api.settings.update(geomaps_tile_provider="OpenStreetMap.Mapnik")
             print("Geomap tile provider set: OpenStreetMap.Mapnik")
-        except Exception as e:  # noqa: BLE001 — cosmetic; must not block provisioning
+        except Exception as e:  # noqa: BLE001
             self._fail("geomap tile provider", e)
 
     def prune(self, assets) -> None:
@@ -124,7 +210,7 @@ class Provisioner:
                 self.api.host.delete(*[h["hostid"] for h in stale])
                 for h in stale:
                     print(f"  - pruned stale host {h['host']}")
-        except Exception as e:  # noqa: BLE001 — best-effort cleanup, not critical path
+        except Exception as e:  # noqa: BLE001
             self._fail("prune", e)
 
     def apply(self, asset: AssetClass) -> None:
@@ -135,8 +221,6 @@ class Provisioner:
             template_id = self._template(asset.template_name, tg_id)
             print(f"  template '{asset.template_name}' ({len(asset.parameters)} params)")
 
-            # One fetch per object kind, scoped to the template — the sets these
-            # feed avoid an N+1 storm of per-object existence checks.
             items = {i["key_"]: i for i in self.api.item.get(
                 templateids=template_id,
                 output=["itemid", "key_", "name", "value_type", "units", "description"])}
@@ -147,21 +231,20 @@ class Provisioner:
             hosts = {h["host"]: h["hostid"] for h in self.api.host.get(
                 filter={"host": host_names}, output=["host", "hostid"])}
         except Exception as e:  # noqa: BLE001
-            # Without the containers/fetches above, nothing for this asset class
-            # can be reconciled meaningfully — skip it, but let the other asset
-            # classes (and the final prune) still run instead of aborting everything.
             self._fail(f"{asset.asset_class} (setup)", e)
             return
 
-        for p in asset.parameters:
+        protos = set(asset.discovery.prototypes) if asset.discovery else set()
+        flat_params = [p for p in asset.parameters if p.key not in protos]
+        proto_params = [p for p in asset.parameters if p.key in protos]
+
+        for p in flat_params:
             self._item(template_id, p, items)
             self._triggers(asset.template_name, p, triggers)
+        if asset.discovery:
+            self._discovery(template_id, asset.template_name, asset.discovery, proto_params)
 
-        # Reconcile: template objects the catalog no longer defines are deleted,
-        # so a renamed key or trigger label doesn't leave an orphan behind.
-        # Triggers first — deleting an item cascades to its triggers, and we
-        # don't want to double-delete.
-        want_descs = {f"{p.name}: {t.label}" for p in asset.parameters for t in p.triggers}
+        want_descs = {f"{p.name}: {t.label}" for p in flat_params for t in p.triggers}
         for d, t in triggers.items():
             if d not in want_descs:
                 try:
@@ -169,7 +252,7 @@ class Provisioner:
                     print(f"    - pruned stale trigger '{d}'")
                 except Exception as e:  # noqa: BLE001
                     self._fail(f"prune trigger '{d}'", e)
-        want_keys = {p.key for p in asset.parameters}
+        want_keys = {p.key for p in flat_params}
         for k, i in items.items():
             if k not in want_keys:
                 try:
@@ -186,7 +269,7 @@ def main() -> None:
     assets = load_all()
     try:
         prov = Provisioner()
-    except Exception as e:  # noqa: BLE001 — zabbix_utils raises several kinds here
+    except Exception as e:  # noqa: BLE001
         raise SystemExit(
             f"Cannot log in to the Zabbix API at {settings.API_URL}: {e}\n"
             f"  - stack not up yet? `make up` (first boot imports the DB, ~30-60s; `make logs`)\n"

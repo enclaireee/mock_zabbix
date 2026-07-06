@@ -117,3 +117,36 @@ triggers:
 
 Generated expression: `last(/<template_name>/<key>) <op> <value>`. Two-sided
 limits (e.g. PSU brownout + overvoltage) are just two trigger entries.
+
+## `discovery` — simulated Low-Level Discovery (LLD)
+
+Optional, one per asset class (only `switch_router.yml` uses it). It turns
+selected flat parameters into **per-instance item/trigger prototypes** under a
+discovery rule — the same mechanism Zabbix uses to auto-create one item per
+switch port, disk, or CPU core.
+
+**This is a lab simulation of SNMP LLD, not a real SNMP walk.** On real hardware
+the rule would SNMP-walk IF-MIB to enumerate interfaces; here there is no switch,
+so the simulator pushes the port list to the rule's key over **trapper** (a
+`{"data":[{"{#IFNAME}":"Gi1/0/1"}, …]}` payload), and the server materializes one
+item per port from each prototype — see `docs/architecture.md` on collectability.
+
+```yaml
+discovery:
+  key: "net.if.discovery"                 # the LLD rule's trapper key
+  name: "Interface discovery (IF-MIB, LLD)"
+  macro: "{#IFNAME}"                       # LLD macro (default {#IFNAME})
+  prototypes: ["net.if.oper_status", "net.if.error_rate"]  # which params are per-port
+  ports: ["Gi1/0/1", "Gi1/0/2", "Gi1/0/8"]                # the simulated walk result
+```
+
+- `prototypes` lists existing parameter **keys** (from `parameters:` above). Each
+  named param becomes an item prototype keyed `<key>[{#IFNAME}]` plus a trigger
+  prototype per trigger; its `sim`/`triggers`/`value_type` are reused unchanged —
+  one state machine definition drives every port. **Any param not listed stays a
+  flat per-host item** (e.g. chassis-level `net.env.fan_state`).
+- `ports` is the stand-in for the SNMP walk: a non-empty, unique list of instance
+  names. The simulator runs one independent state machine per (host, port).
+- Validation is load-time (`otobs/catalog.py`): missing fields, empty/duplicate
+  ports, a `prototypes` entry that isn't a real param key, a `macro` not shaped
+  `{#…}`, or a `key` that collides with a param key all fail at load.

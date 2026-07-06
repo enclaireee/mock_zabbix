@@ -71,9 +71,6 @@ class Sim:
     states: list[State]
 
     def __post_init__(self):
-        # A zero total would make the weight normalization divide by zero at
-        # sample time; fail loudly at load instead, like every other bad-catalog
-        # case. Normalize once here — states never change after load.
         total = sum(s.weight for s in self.states)
         if total <= 0:
             raise ValueError(f"{self.kind} sim: state weights sum to 0")
@@ -99,7 +96,6 @@ class Parameter:
 
     @cached_property
     def interval_s(self) -> int:
-        # Parsed once per parameter, not re-parsed on every tick of the live loop.
         return parse_interval(self.interval)
 
     @property
@@ -124,6 +120,19 @@ class Host:
 
 
 @dataclass
+class Discovery:
+    """A simulated SNMP Low-Level Discovery rule, fed by trapper. On a real switch
+    an SNMP walk of IF-MIB enumerates ports; here `ports` is the lab's stand-in for
+    that walk. Each param key in `prototypes` becomes a per-port item/trigger
+    *prototype* keyed `<key>[<port>]`; every other param stays a flat per-host item."""
+    key: str
+    name: str
+    ports: list[str]
+    prototypes: list[str]
+    macro: str = "{#IFNAME}"
+
+
+@dataclass
 class AssetClass:
     asset_class: str
     host_group: str
@@ -131,6 +140,7 @@ class AssetClass:
     template_group: str
     hosts: list[Host]
     parameters: list[Parameter]
+    discovery: Discovery | None = None
 
 
 def _build_sim(raw: dict, where: str) -> Sim:
@@ -140,10 +150,6 @@ def _build_sim(raw: dict, where: str) -> Sim:
         for st in raw.get("states", []):
             if "value" not in st or "weight" not in st:
                 raise ValueError(f"{where}: enum state needs 'value' and 'weight': {st!r}")
-            # A string weight IS the band (good/underperform/failed). A numeric
-            # weight has no band token, so key the band off the value to keep each
-            # state distinct — otherwise every such state collapses to one "custom"
-            # band and correlation/_idx_of_band can't tell them apart.
             band = st["weight"] if isinstance(st["weight"], str) else f"custom:{st['value']}"
             states.append(State(weight=_weight(st["weight"]), band=band, value=st["value"]))
         if not states:
@@ -151,7 +157,6 @@ def _build_sim(raw: dict, where: str) -> Sim:
         return Sim(kind, states)
     if kind == "numeric":
         weights = raw.get("weights", ["good", "underperform", "failed"])
-        # zip() would silently truncate to the shorter list, dropping a band.
         if len(weights) != 3:
             raise ValueError(f"{where}: weights needs 3 entries (good/underperform/failed), "
                              f"got {len(weights)}")
@@ -181,7 +186,7 @@ def _build_param(raw: dict, where: str) -> Parameter:
     parse_interval(raw["interval"])
     try:
         triggers = [Trigger(**t) for t in raw.get("triggers", [])]
-    except TypeError as e:  # unknown/missing trigger field -> ValueError like the rest
+    except TypeError as e:
         raise ValueError(f"{where}.{raw.get('key','?')}: bad trigger fields: {e}")
     return Parameter(
         key=raw["key"], name=raw["name"], value_type=raw["value_type"],
@@ -191,6 +196,32 @@ def _build_param(raw: dict, where: str) -> Parameter:
         sim=_build_sim(raw["sim"], f"{where}.{raw['key']}"),
         triggers=triggers,
     )
+
+
+def _build_discovery(raw: dict, param_keys: set[str], where: str) -> Discovery:
+    for r in ("key", "name", "ports", "prototypes"):
+        if r not in raw:
+            raise ValueError(f"{where}: discovery missing {r!r}")
+    macro = raw.get("macro", "{#IFNAME}")
+    if not (isinstance(macro, str) and macro.startswith("{#") and macro.endswith("}")):
+        raise ValueError(f"{where}: discovery.macro {macro!r} must look like '{{#IFNAME}}'")
+    ports = raw["ports"]
+    if not isinstance(ports, list) or not ports:
+        raise ValueError(f"{where}: discovery.ports must be a non-empty list")
+    if not all(isinstance(p, str) and p for p in ports):
+        raise ValueError(f"{where}: discovery.ports must all be non-empty strings, got {ports!r}")
+    if len(ports) != len(set(ports)):
+        raise ValueError(f"{where}: discovery.ports has duplicates")
+    protos = raw["prototypes"]
+    if not isinstance(protos, list) or not protos:
+        raise ValueError(f"{where}: discovery.prototypes must be a non-empty list")
+    missing = [k for k in protos if k not in param_keys]
+    if missing:
+        raise ValueError(f"{where}: discovery.prototypes reference unknown keys {missing}")
+    if raw["key"] in param_keys:
+        raise ValueError(f"{where}: discovery.key {raw['key']!r} collides with a parameter key")
+    return Discovery(key=raw["key"], name=raw["name"], ports=ports,
+                     prototypes=protos, macro=macro)
 
 
 def load_sites(directory: Path) -> list[dict]:
@@ -246,10 +277,12 @@ def load_file(path: Path, sites: list[dict] | None = None) -> AssetClass:
     keys = [p.key for p in params]
     if len(keys) != len(set(keys)):
         raise ValueError(f"{path.name}: duplicate item keys")
+    discovery = _build_discovery(raw["discovery"], set(keys), path.name) \
+        if "discovery" in raw else None
     return AssetClass(
         asset_class=raw["asset_class"], host_group=raw["host_group"],
         template_name=raw["template_name"], template_group=raw["template_group"],
-        hosts=hosts, parameters=params,
+        hosts=hosts, parameters=params, discovery=discovery,
     )
 
 
@@ -261,9 +294,6 @@ def load_all(directory: Path | None = None) -> list[AssetClass]:
     if not files:
         raise ValueError(f"no catalog *.yml in {directory}")
     assets = [load_file(p, sites) for p in files]
-    # Keys must be unique across ALL files, not just within one: sim_config
-    # validation and the trapper both address items by bare key, so a cross-file
-    # collision would silently shadow one parameter.
     seen: dict[str, str] = {}
     for a in assets:
         for p in a.parameters:

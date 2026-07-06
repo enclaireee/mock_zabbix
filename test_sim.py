@@ -3,6 +3,7 @@
 Covers the load-bearing claims: strict no-op when disabled, correlation bias,
 trend ramp, dropout, and sim_config validation. `make check` covers the catalog.
 """
+import json
 import random
 
 from otobs.catalog import Parameter, Sim, State
@@ -379,6 +380,93 @@ def test_backfill_bucket_scheduler_fires_every_due_tick():
     expected = sum(math.floor(span_s / iv) + 1 for iv in intervals.values())
     got = sum(sent_counts)
     assert got == expected, f"bucket scheduler lost/duplicated events: got {got}, want {expected}"
+
+
+def _switch_asset():
+    """Synthetic switch: 2 per-port prototype params + 1 flat chassis param, 2 hosts."""
+    from otobs.catalog import AssetClass, Host, Discovery
+    params = [param("net.if.oper_status"), param("net.if.error_rate"), param("net.env.fan_state")]
+    disc = Discovery("net.if.discovery", "Interface discovery",
+                     ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"],
+                     ["net.if.oper_status", "net.if.error_rate"])
+    return AssetClass("Switch / Router", "hg", "Template OT Switch Router", "tg",
+                      [Host("SW-A", "SW-A"), Host("SW-B", "SW-B")], params, discovery=disc)
+
+
+def test_discovery_payload_shape():
+    """One LLD trap per host, on the rule key, listing every port under {#IFNAME}."""
+    from otobs.simulate import discovery_payloads
+    payloads = discovery_payloads([_switch_asset()])
+    assert len(payloads) == 2, "expected one discovery trap per host"
+    hosts = {h for h, _, _ in payloads}
+    assert hosts == {"SW-A", "SW-B"}
+    _, key, js = payloads[0]
+    assert key == "net.if.discovery"
+    assert json.loads(js) == {"data": [{"{#IFNAME}": "Gi1/0/1"},
+                                       {"{#IFNAME}": "Gi1/0/2"},
+                                       {"{#IFNAME}": "Gi1/0/3"}]}
+
+
+def test_per_port_stream_expansion():
+    """Prototype params fan out to one stream per port with a [<port>] send_key;
+    the flat chassis param stays bare; every port reuses the base Parameter."""
+    from otobs.simulate import build_streams
+    streams = build_streams([_switch_asset()])
+    # 2 hosts * (2 protos * 3 ports + 1 flat) = 14
+    assert len(streams) == 14, f"got {len(streams)}"
+    keys = {s.send_key for s in streams}
+    assert "net.if.oper_status[Gi1/0/2]" in keys
+    assert "net.if.error_rate[Gi1/0/3]" in keys
+    assert "net.env.fan_state" in keys, "flat chassis item must not be per-port"
+    assert "net.if.oper_status" not in keys, "prototype must not also emit a bare key"
+    op = [s for s in streams if s.param.key == "net.if.oper_status"]
+    assert len(op) == 6 and all(s.param.sim is op[0].param.sim for s in op), \
+        "per-port streams must share the base Parameter's state machine"
+
+
+def test_per_port_streams_run_independently():
+    """Each port advances its own state machine and emits under its own key."""
+    from otobs.simulate import build_streams, process_stream
+    streams = [s for s in build_streams([_switch_asset()])
+               if s.host == "SW-A" and s.param.key == "net.if.error_rate"]
+    random.seed(0)
+    for s in streams:
+        v = process_stream(s, 0.0, 1.0, SimConfig(), {}, 0)
+        assert v is not None and s.state_idx is not None
+    assert {s.send_key for s in streams} == {
+        "net.if.error_rate[Gi1/0/1]", "net.if.error_rate[Gi1/0/2]", "net.if.error_rate[Gi1/0/3]"}
+
+
+def test_discovery_validation():
+    from otobs.catalog import _build_discovery
+    pk = {"net.if.oper_status", "net.env.fan_state"}
+    ok = _build_discovery({"key": "net.if.discovery", "name": "d", "ports": ["Gi1/0/1"],
+                           "prototypes": ["net.if.oper_status"]}, pk, "x")
+    assert ok.macro == "{#IFNAME}" and ok.ports == ["Gi1/0/1"]
+    bad = [
+        {"key": "net.if.discovery", "name": "d", "ports": [], "prototypes": ["net.if.oper_status"]},
+        {"key": "net.if.discovery", "name": "d", "ports": ["a", "a"], "prototypes": ["net.if.oper_status"]},
+        {"key": "net.if.discovery", "name": "d", "ports": ["Gi1/0/1"], "prototypes": ["nope"]},
+        {"key": "net.if.oper_status", "name": "d", "ports": ["Gi1/0/1"], "prototypes": ["net.if.oper_status"]},
+        {"key": "net.if.discovery", "name": "d", "ports": ["Gi1/0/1"], "prototypes": ["net.if.oper_status"], "macro": "IFNAME"},
+    ]
+    for b in bad:
+        try:
+            _build_discovery(b, pk, "x"); assert False, f"accepted {b}"
+        except ValueError:
+            pass
+
+
+def test_real_switch_catalog_has_discovery():
+    """The shipped switch catalog marks the four per-port params as prototypes and
+    keeps fan_state flat — the load-bearing schema claim for this feature."""
+    from otobs.catalog import load_all
+    sw = next(a for a in load_all() if "Switch" in a.asset_class)
+    assert sw.discovery is not None
+    assert set(sw.discovery.prototypes) == {
+        "net.if.oper_status", "net.if.admin_status", "net.if.error_rate", "net.if.discards"}
+    assert "net.env.fan_state" not in sw.discovery.prototypes
+    assert len(sw.discovery.ports) >= 2
 
 
 if __name__ == "__main__":
