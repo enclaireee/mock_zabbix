@@ -117,10 +117,13 @@ parameters:
 # Simulated SNMP Low-Level Discovery. `prototypes` names which parameters above are
 # per-port (each becomes an item/trigger prototype keyed <key>[{#IFNAME}]); every
 # other parameter stays flat. `ports` is the lab's stand-in for the SNMP walk that
-# would enumerate interfaces on real hardware — one 8-port access switch here.
+# would enumerate interfaces on real hardware — one 24-port access switch here.
 discovery:
   key: "net.if.discovery"
   name: "Interface discovery (IF-MIB, LLD)"
   macro: "{#IFNAME}"
   prototypes: ["net.if.oper_status", "net.if.admin_status", "net.if.error_rate", "net.if.discards"]
-  ports: ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3", "Gi1/0/4", "Gi1/0/5", "Gi1/0/6", "Gi1/0/7", "Gi1/0/8"]
+  ports: ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3", "Gi1/0/4", "Gi1/0/5", "Gi1/0/6",
+          "Gi1/0/7", "Gi1/0/8", "Gi1/0/9", "Gi1/0/10", "Gi1/0/11", "Gi1/0/12",
+          "Gi1/0/13", "Gi1/0/14", "Gi1/0/15", "Gi1/0/16", "Gi1/0/17", "Gi1/0/18",
+          "Gi1/0/19", "Gi1/0/20", "Gi1/0/21", "Gi1/0/22", "Gi1/0/23", "Gi1/0/24"]
