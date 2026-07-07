@@ -42,7 +42,12 @@ Open **http://localhost:8080** → login **`Admin` / `zabbix`**:
   `provision` sets the OpenStreetMap tile provider and each host's inventory
   lat/lon from [`catalog/sites.yml`](catalog/sites.yml) automatically — see
   [docs/geomap.md](docs/geomap.md).
-- **Data collection → Hosts / Templates** — the provisioned config.
+- **Data collection → Hosts / Templates** — the provisioned config, including the
+  comm-link segment/circuit items on `COMM-MCS-NOC01`.
+- **Data collection → SLA** / **Services** — *you build these yourself* from the
+  live comm-link data: one Service per circuit (each circuit's "down" trigger is
+  pre-tagged `link:<circuit_key>` to make the mapping trivial) and an SLA object.
+  Step-by-step in [docs/comm-links-sla.md](docs/comm-links-sla.md).
 
 ## 4. Make targets
 

@@ -61,6 +61,10 @@ class Provisioner:
         except Exception as e:  # noqa: BLE001
             self._fail(f"item {p.key}", e)
 
+    @staticmethod
+    def _norm_tags(tags) -> list:
+        return sorted((x["tag"], x.get("value", "")) for x in (tags or []))
+
     def _triggers(self, template_name: str, p: Parameter, existing: dict[str, dict]) -> None:
         for t in p.triggers:
             desc = f"{p.name}: {t.label}"
@@ -69,10 +73,13 @@ class Provisioner:
             got = existing.get(desc)
             try:
                 if got is None:
-                    self.api.trigger.create(description=desc, **want)
+                    self.api.trigger.create(description=desc, **want,
+                                            **({"tags": t.tags} if t.tags else {}))
                     print(f"      ! trigger [{t.severity}] {t.label}")
                     continue
                 diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
+                if t.tags and self._norm_tags(got.get("tags")) != self._norm_tags(t.tags):
+                    diff["tags"] = t.tags
                 if diff:
                     self.api.trigger.update(triggerid=got["triggerid"], **diff)
                     print(f"      ~ trigger [{t.severity}] {t.label} (updated: {', '.join(diff)})")
@@ -225,7 +232,7 @@ class Provisioner:
                 templateids=template_id,
                 output=["itemid", "key_", "name", "value_type", "units", "description"])}
             triggers = {t["description"]: t for t in self.api.trigger.get(
-                templateids=template_id, expandExpression=True,
+                templateids=template_id, expandExpression=True, selectTags=["tag", "value"],
                 output=["triggerid", "description", "priority", "expression"])}
             host_names = [h.host for h in asset.hosts]
             hosts = {h["host"]: h["hostid"] for h in self.api.host.get(

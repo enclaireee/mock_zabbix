@@ -187,6 +187,35 @@ def correlation_forces(cfg: SimConfig, by_host: dict) -> dict:
     return forced
 
 
+def segment_forces(assets: list[AssetClass], by_host: dict) -> dict:
+    """{(host, circuit_key): band} forcing each comm-link circuit to the WORST
+    current state of the physical segment(s) it rides — a hard, deterministic
+    force (unlike the probabilistic same-host `correlation` web). One fiber cut
+    thus drops every circuit on that span together; VSAT circuits (no depends_on)
+    are skipped and roll their own independent ping-loss machine.
+
+    Reads segments' CURRENT (pre-roll) state, exactly like correlation_forces, so
+    it's causal and order-independent. Segments and circuits share the one NOC
+    host, so the same per-host stream index resolves the dependency."""
+    forced: dict = {}
+    for a in assets:
+        for c in a.circuits:
+            if not c.param.depends_on:
+                continue
+            for host, sd in by_host.items():
+                if c.param.key not in sd:
+                    continue
+                worst = "good"
+                for seg_key in c.param.depends_on:
+                    seg = sd.get(seg_key)
+                    if seg and seg.state_idx is not None \
+                            and seg.param.sim.states[seg.state_idx].band != "good":
+                        worst = "failed"  # any down segment -> circuit down
+                        break
+                forced[(host, c.param.key)] = worst
+    return forced
+
+
 def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
                    forced: dict, hour: float):
     """Advance one due stream one tick. Returns the emitted value, or None if the
@@ -244,6 +273,7 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
             continue
         hour = _hour(time.time()) if cfg.time_of_day.enabled else 0.0
         forced = correlation_forces(cfg, by_host)
+        forced.update(segment_forces(assets, by_host))  # hard segment->circuit force wins
         batch, notes = [], []
         for s in due:
             s.next_due = now + s.param.interval_s / scale
@@ -346,6 +376,7 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     while group_due and vt < end:
         hour = _hour(vt) if cfg.time_of_day.enabled else 0.0
         forced = correlation_forces(cfg, by_host)
+        forced.update(segment_forces(assets, by_host))  # hard segment->circuit force wins
         for iv, due_t in group_due.items():
             if due_t > vt:
                 continue

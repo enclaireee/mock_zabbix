@@ -57,6 +57,7 @@ class Trigger:
     severity: str
     label: str
     func: str = "last"
+    tags: list[dict] = field(default_factory=list)  # Zabbix event tags (SLA service matching)
 
     def __post_init__(self):
         if self.severity not in SEVERITY_CODE:
@@ -93,6 +94,7 @@ class Parameter:
     source: str
     sim: Sim
     triggers: list[Trigger] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)  # comm-link circuits: segment keys it rides
 
     @cached_property
     def interval_s(self) -> int:
@@ -133,6 +135,26 @@ class Discovery:
 
 
 @dataclass
+class Segment:
+    """A physical media path that can fail as a unit — a fiber span between two
+    stations, or an MPLS backhaul. Its `param` is a normal Zabbix item (enum
+    up/down, like net.if.oper_status). Circuits ride segments; a segment down
+    drops every circuit on it together."""
+    param: Parameter
+
+
+@dataclass
+class Circuit:
+    """One of the report's named logical links. Rides one or more `depends_on`
+    segments (its state = worst of them) — or, for VSAT-IP, rides none and is
+    simulated independently as an ICMP ping-loss check. `media` is the report's
+    transport label (Metro-E / VSAT-IP / MPLS), embedded for documentation."""
+    param: Parameter
+    depends_on: list[str]
+    media: str = ""
+
+
+@dataclass
 class AssetClass:
     asset_class: str
     host_group: str
@@ -141,6 +163,8 @@ class AssetClass:
     hosts: list[Host]
     parameters: list[Parameter]
     discovery: Discovery | None = None
+    segments: list[Segment] = field(default_factory=list)
+    circuits: list[Circuit] = field(default_factory=list)
 
 
 def _build_sim(raw: dict, where: str) -> Sim:
@@ -224,6 +248,45 @@ def _build_discovery(raw: dict, param_keys: set[str], where: str) -> Discovery:
                      prototypes=protos, macro=macro)
 
 
+def _build_comm_links(raw: dict, where: str) -> tuple[list[Segment], list[Circuit], list[Parameter]]:
+    """Compile the two-layer comm-link schema (segments + circuits) into typed
+    objects plus the flat Parameter list the provisioner/simulator already understand.
+
+    Segments and circuits are both ordinary Zabbix items under the hood; the only
+    new data is a circuit's `depends_on` (which segments it rides) and `media`.
+    Every circuit's high/disaster 'down' trigger is auto-tagged `link:<key>` so the
+    SLA service layer (otobs/sla.py) can match its downtime problems."""
+    segs_raw = raw.get("segments") or []
+    circ_raw = raw.get("circuits") or []
+    if not segs_raw:
+        raise ValueError(f"{where}: comm-link catalog needs a non-empty 'segments:' list")
+    if not circ_raw:
+        raise ValueError(f"{where}: comm-link catalog needs a non-empty 'circuits:' list")
+
+    segments = [Segment(param=_build_param(s, f"{where} segment")) for s in segs_raw]
+    seg_keys = {s.param.key for s in segments}
+
+    circuits: list[Circuit] = []
+    for c in circ_raw:
+        deps = c.get("depends_on") or []
+        if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
+            raise ValueError(f"{where}: circuit {c.get('key','?')!r} depends_on must be a list of segment keys")
+        param = _build_param(c, f"{where} circuit")
+        param.depends_on = list(deps)
+        for t in param.triggers:  # only the 'down' trigger drives SLA downtime
+            if t.severity in ("high", "disaster"):
+                t.tags = [*t.tags, {"tag": "link", "value": param.key}]
+        circuits.append(Circuit(param=param, depends_on=list(deps), media=c.get("media", "")))
+
+    for c in circuits:
+        missing = [d for d in c.depends_on if d not in seg_keys]
+        if missing:
+            raise ValueError(f"{where}: circuit {c.param.key!r} depends_on unknown segment(s) {missing}")
+
+    params = [s.param for s in segments] + [c.param for c in circuits]
+    return segments, circuits, params
+
+
 def load_sites(directory: Path) -> list[dict]:
     """Station registry (sites.yml). One entry per physical site; asset classes
     generate a host each from it. Empty list if the file is absent."""
@@ -260,7 +323,11 @@ def _expand_hosts(tmpl: dict, sites: list[dict], where: str) -> list[Host]:
 def load_file(path: Path, sites: list[dict] | None = None) -> AssetClass:
     sites = sites or []
     raw = yaml.safe_load(path.read_text())
-    for r in ["asset_class", "host_group", "template_name", "template_group", "parameters"]:
+    is_comm = "segments" in raw or "circuits" in raw
+    required = ["asset_class", "host_group", "template_name", "template_group"]
+    if not is_comm:
+        required.append("parameters")
+    for r in required:
         if r not in raw:
             raise ValueError(f"{path.name}: missing top-level {r!r}")
     if "host_template" in raw:
@@ -273,7 +340,11 @@ def load_file(path: Path, sites: list[dict] | None = None) -> AssetClass:
                  for h in raw["hosts"]]
     else:
         raise ValueError(f"{path.name}: needs 'host_template' (with sites.yml) or 'hosts'")
-    params = [_build_param(p, path.name) for p in raw["parameters"]]
+    if is_comm:
+        segments, circuits, params = _build_comm_links(raw, path.name)
+    else:
+        segments, circuits = [], []
+        params = [_build_param(p, path.name) for p in raw["parameters"]]
     keys = [p.key for p in params]
     if len(keys) != len(set(keys)):
         raise ValueError(f"{path.name}: duplicate item keys")
@@ -283,6 +354,7 @@ def load_file(path: Path, sites: list[dict] | None = None) -> AssetClass:
         asset_class=raw["asset_class"], host_group=raw["host_group"],
         template_name=raw["template_name"], template_group=raw["template_group"],
         hosts=hosts, parameters=params, discovery=discovery,
+        segments=segments, circuits=circuits,
     )
 
 

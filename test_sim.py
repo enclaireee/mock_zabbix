@@ -469,6 +469,54 @@ def test_real_switch_catalog_has_discovery():
     assert len(sw.discovery.ports) >= 2
 
 
+def test_comm_link_segment_derivation():
+    """A downed physical segment forces EVERY circuit riding it to 'down' together
+    (shared-fiber cascade), leaves circuits on healthy segments 'up', and never
+    touches independent VSAT circuits. This is the comm-link feature's core claim."""
+    from otobs.catalog import load_all
+    from otobs.simulate import (build_streams, _by_host, segment_forces,
+                                process_stream, _idx_of_band)
+    from otobs.sim_config import SimConfig
+
+    comm = next(a for a in load_all() if a.circuits)
+    streams = build_streams([comm])
+    by_host = _by_host(streams)
+    host = comm.hosts[0].host
+    sd = by_host[host]
+
+    # Cut the SHARED Grissik–PGD span; keep everything else up.
+    for key, s in sd.items():
+        if key.startswith("seg."):
+            s.state_idx = _idx_of_band(s.param.sim, "good")
+    cut = sd["seg.fiber_grissik_pgd"]
+    cut.state_idx = _idx_of_band(cut.param.sim, "failed")
+
+    forced = segment_forces([comm], by_host)
+    # Both circuits on the cut span drop; one on a healthy span stays up.
+    assert forced[(host, "circ.grissik_pgd")] == "failed"
+    assert forced[(host, "circ.grissik_pgd_pabx")] == "failed"   # shares the span
+    assert forced[(host, "circ.pgd_mcs")] == "good"
+    # VSAT circuits are independent — never force-derived.
+    assert (host, "circ.vsat_pgd_mcs") not in forced
+
+    # And the force actually produces the 'down' enum value on the circuit stream.
+    circ = sd["circ.grissik_pgd"]
+    v = process_stream(circ, now=0.0, scale=1.0, cfg=SimConfig(), forced=forced, hour=0.0)
+    assert v == 2, f"forced-down circuit emitted {v!r}, want 2 (down)"
+    assert circ.param.sim.states[circ.state_idx].band == "failed"
+
+
+def test_comm_link_trigger_tags_scoped_to_down():
+    """Only the high/disaster 'down' trigger of a circuit carries the link tag the
+    SLA service matches on — a warning-level VSAT loss must not count as downtime."""
+    from otobs.catalog import load_all
+    comm = next(a for a in load_all() if a.circuits)
+    vsat = next(c for c in comm.circuits if not c.depends_on)
+    tagged = {t.severity: t.tags for t in vsat.param.triggers}
+    assert tagged["high"] == [{"tag": "link", "value": vsat.param.key}]
+    assert tagged["warning"] == []
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

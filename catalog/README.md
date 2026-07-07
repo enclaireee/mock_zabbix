@@ -150,3 +150,53 @@ discovery:
 - Validation is load-time (`otobs/catalog.py`): missing fields, empty/duplicate
   ports, a `prototypes` entry that isn't a real param key, a `macro` not shaped
   `{#…}`, or a `key` that collides with a param key all fail at load.
+
+## `segments:` / `circuits:` — the comm-link SLA schema
+
+One catalog file (`comm_links.yml`) uses this **instead of** `parameters:`. It
+models the two-layer communication-link system: physical media that fail as a
+unit, and the logical circuits that ride them. Full rationale:
+[docs/comm-links-sla.md](../docs/comm-links-sla.md).
+
+```yaml
+segments:            # physical media (fiber span / MPLS backhaul) — each a Zabbix item
+  - key: "seg.fiber_grissik_pgd"
+    name: "Segment: Grissik–Pagardewa fiber"
+    value_type: unsigned
+    # ...all the normal parameter fields (interval/component/collection/…)...
+    sim: { kind: enum, states: [ {value: 1, weight: good, ...}, {value: 2, weight: failed, ...} ] }
+    triggers: [ { op: "=", value: 2, severity: high, label: "Segment down" } ]
+
+circuits:            # the report's named links — also Zabbix items
+  - key: "circ.grissik_pgd"
+    name: "Grissik–PGD (Metro-E 4M)"
+    media: "Metro-E"                       # transport label (documentation)
+    depends_on: [ "seg.fiber_grissik_pgd" ]  # segment key(s) it rides
+    value_type: unsigned
+    sim: { kind: enum, states: [ ... up/down ... ] }   # weights ignored (state = worst segment)
+    triggers: [ { op: "=", value: 2, severity: high, label: "Circuit down" } ]
+  - key: "circ.vsat_pgd_mcs"
+    media: "VSAT-IP"
+    depends_on: []                         # no segment -> simulated independently
+    value_type: float
+    units: "%"
+    collection: "Simple check (icmppingloss)"          # different collection = real constraint
+    sim: { kind: numeric, good: [0,1], underperform: [3,20], failed: [60,100], ... }
+    triggers: [ { op: ">=", value: 60, severity: high, label: "VSAT link down" } ]
+```
+
+- A **segment** is an ordinary parameter (see "A parameter" above); it becomes a
+  flat Zabbix item + triggers like any other.
+- A **circuit** is a parameter plus two extra fields:
+  - `depends_on`: list of segment `key`s it rides. Its simulated state is the
+    **worst** of those segments (any segment down ⇒ circuit down) — a hard,
+    deterministic dependency resolved by `segment_forces` in the simulator, so
+    circuits sharing a span drop together. An **empty** `depends_on` means the
+    circuit rolls its own machine independently (VSAT-IP).
+  - `media`: the report's transport label, embedded for documentation.
+- The circuit's **high/disaster** trigger is auto-tagged `link:<key>` at load
+  time; that tag is how the Zabbix SLA service layer (`otobs/sla.py`) attributes
+  downtime to the right circuit. You don't write the tag yourself.
+- Validation is load-time: a `depends_on` that names an unknown segment key, or a
+  segment/circuit list that is empty, fails at load. Segment and circuit `key`s
+  share the same catalog-wide uniqueness check as `parameters`.

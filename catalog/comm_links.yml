@@ -1,0 +1,139 @@
+# =============================================================================
+# Asset Class: Communication-Link SLA System (PGN "Media Link Komunikasi")
+#
+# The FIFTH system in the lab. Models the 24 real inter-station comm links from
+# the PGN SLA report as TWO layers:
+#
+#   segments:  physical media that fails as a unit — a fiber span between two
+#              stations, or an MPLS backhaul. One Zabbix item each (enum up/down,
+#              exactly like a switch port's net.if.oper_status).
+#   circuits:  the 24 named links in the report. A fiber/Metro-E/MPLS circuit
+#              rides one or more segments (`depends_on`) and its status is the
+#              WORST of them — so one fiber cut drops every circuit on that span
+#              together (data trunk + PABX + FXO), the way a real ROW excavation
+#              would. VSAT-IP circuits ride NO segment (independent satellite RF
+#              path) and are simulated as an ICMP ping-loss check.
+#
+# All items live on one NOC host (these are point-to-point links watched centrally
+# at MCS Cilegon, not per-site assets). The dependency mechanic lives in
+# otobs/simulate.py (segment_forces); SLA %/services live in otobs/sla.py.
+# Full rationale: docs/comm-links-sla.md.
+# =============================================================================
+asset_class: "Communication Links"
+host_group: "Network/Comm Links"
+template_name: "Template OT Comm Links"
+template_group: "Templates/OT"
+
+hosts:
+  - host: "COMM-MCS-NOC01"
+    name: "MCS Cilegon — Media Link Komunikasi (NOC)"
+    macros: { "{$SLA_TARGET}": "98" }
+    inventory:
+      location: "Master Control Station, Cilegon, Banten"
+      location_lat: "-5.9020"
+      location_lon: "106.0780"
+      site_city: "Cilegon"
+      site_country: "Indonesia"
+
+# Reusable sim/trigger blocks. `_anchors` is not a schema key — the loader ignores
+# unknown top-level keys; it exists only so the YAML anchors below have a home.
+_anchors:
+  # good/failed TOKENS (not numbers) so the bands are named good/failed — the
+  # segment->circuit derivation keys off band names, like switch oper_status.
+  seg_sim: &seg_sim
+    kind: enum
+    states:
+      - { value: 1, weight: good,   label: "up(1)" }
+      - { value: 2, weight: failed, label: "down(2) — segment fault" }
+  seg_trig: &seg_trig
+    op: "="
+    value: 2
+    severity: high
+    label: "Media segment down — every circuit on it drops"
+  # Circuit weights are IGNORED for fiber/MPLS circuits (state is forced to the
+  # worst depended segment); they must still be valid good+failed bands.
+  circ_sim: &circ_sim
+    kind: enum
+    states:
+      - { value: 1, weight: good,   label: "up(1)" }
+      - { value: 2, weight: failed, label: "down(2)" }
+  circ_trig: &circ_trig
+    op: "="
+    value: 2
+    severity: high
+    label: "Circuit down — media segment fault"
+  # VSAT-IP: independent ICMP ping-loss %, no segment. good = near-zero loss.
+  vsat_sim: &vsat_sim
+    kind: numeric
+    good: [0, 1]
+    underperform: [3, 20]
+    failed: [60, 100]
+    weights: [good, underperform, failed]
+    jitter: 0.5
+  vsat_defaults: &vsat_defaults
+    media: "VSAT-IP"
+    depends_on: []
+    value_type: float
+    units: "%"
+    interval: "1m"
+    component: "Logical circuit (satellite)"
+    collection: "Simple check (icmppingloss) — no MIB access to a leased VSAT modem"
+    failure_mode: "Rain fade, satellite RF path loss, modem de-lock"
+
+# -----------------------------------------------------------------------------
+# PHYSICAL MEDIA SEGMENTS (13) — the fiber spans + backhauls that actually fail.
+# Derived from the report's `Lokasi` column; four spans are SHARED by 2 circuits.
+# -----------------------------------------------------------------------------
+segments:
+  - { key: "seg.fiber_spg_pgd",              name: "Segment: SPG–Pagardewa fiber",              value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report; RFC 2863 IF-MIB", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_grissik_mcs",          name: "Segment: Grissik–MCS Cilegon fiber",        value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report; RFC 2863 IF-MIB", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_tbb_mcs",              name: "Segment: Terbanggi Besar–MCS Cilegon fiber", value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report; RFC 2863 IF-MIB", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_labuhanmaringgai_mcs", name: "Segment: Labuhan Maringgai–MCS fiber (SHARED)", value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report rows 4 & 11", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_grissik_pgd",          name: "Segment: Grissik–Pagardewa fiber (SHARED)",  value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report rows 5 & 9", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_tbb_pgd",              name: "Segment: Terbanggi Besar–Pagardewa fiber (SHARED)", value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report rows 6 & 12", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_labuhanmaringgai_pgd", name: "Segment: Labuhan Maringgai–Pagardewa fiber (SHARED)", value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report rows 7 & 10", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_pgd_mcs",              name: "Segment: Pagardewa–MCS Cilegon fiber",       value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report row 8", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_muarabekasi_mcs",      name: "Segment: Muara Bekasi–MCS Cilegon fiber",    value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report row 13", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_muarabekasi_pgd",      name: "Segment: Muara Bekasi–Pagardewa fiber",      value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on terminating Metro-E port)", failure_mode: "Fiber cut, SFP laser death, ROW excavation", source: "PGN Media Link SLA report row 14", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_cogent_jakarta",       name: "Segment: Cogent internet uplink (Jakarta)",  value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on the Cogent handoff port)", failure_mode: "Upstream ISP outage, last-mile fiber cut", source: "PGN Media Link SLA report row 15", sim: *seg_sim, triggers: [ *seg_trig ] }
+  - { key: "seg.fiber_mcs_backhaul",         name: "Segment: MCS Cilegon backhaul fiber (Metro-E)", value_type: unsigned, units: "", interval: "1m", component: "Physical media (fiber span)", collection: "native SNMP (IF-MIB ifOperStatus on backhaul port)", failure_mode: "Fiber cut, SFP laser death", source: "PGN Media Link SLA report row 24", sim: *seg_sim, triggers: [ *seg_trig ] }
+  # ASSUMPTION (see docs/comm-links-sla.md): the MPLS backhaul is CPE we terminate
+  # at both ends, so we model it like a Metro-E segment (oper-status-derived), not
+  # as a black-box provider cloud we can only ping.
+  - { key: "seg.mpls_mcs_backhaul",          name: "Segment: MCS Cilegon backhaul (MPLS CPE)",   value_type: unsigned, units: "", interval: "1m", component: "Physical media (MPLS backhaul)", collection: "native SNMP (IF-MIB ifOperStatus on MPLS CE port) — assumes CPE both ends", failure_mode: "PE-CE link down, provider MPLS core fault", source: "PGN Media Link SLA report row 23", sim: *seg_sim, triggers: [ *seg_trig ] }
+
+# -----------------------------------------------------------------------------
+# LOGICAL CIRCUITS (24) — the report rows. `depends_on` = the segment(s) each
+# rides; state = worst of them. VSAT circuits ride nothing (independent).
+# -----------------------------------------------------------------------------
+circuits:
+  # -- Metro-E / fiber data trunks (report rows 1–8) --
+  - { key: "circ.spg_pgd",              name: "SPG–PGD (Metro-E 1M)",                 media: "Metro-E", depends_on: [ "seg.fiber_spg_pgd" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides SPG–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 1",  sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.grissik_mcs",          name: "Grissik–MCS (Metro-E 4M)",             media: "Metro-E", depends_on: [ "seg.fiber_grissik_mcs" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides Grissik–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 2",  sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.tbb_mcs",              name: "Terbanggi Besar–MCS (Metro-E 4M)",     media: "Metro-E", depends_on: [ "seg.fiber_tbb_mcs" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides TBB–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 3",  sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.labuhanmaringgai_mcs", name: "Labuhan Maringgai–MCS (Metro-E 4M)",   media: "Metro-E", depends_on: [ "seg.fiber_labuhanmaringgai_mcs" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides LabuhanMaringgai–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 4", sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.grissik_pgd",          name: "Grissik–PGD (Metro-E 4M)",             media: "Metro-E", depends_on: [ "seg.fiber_grissik_pgd" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides Grissik–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 5",  sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.tbb_pgd",              name: "Terbanggi Besar–PGD (Metro-E 4M)",     media: "Metro-E", depends_on: [ "seg.fiber_tbb_pgd" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides TBB–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 6",  sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.labuhanmaringgai_pgd", name: "Labuhan Maringgai–PGD (Metro-E 4M)",   media: "Metro-E", depends_on: [ "seg.fiber_labuhanmaringgai_pgd" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides LabuhanMaringgai–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 7", sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.pgd_mcs",              name: "PGD–MCS (Metro-E 4M)",                 media: "Metro-E", depends_on: [ "seg.fiber_pgd_mcs" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides PGD–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 8",  sim: *circ_sim, triggers: [ *circ_trig ] }
+  # -- PABX / FXO voice circuits — SHARE a physical span with a data trunk above --
+  - { key: "circ.grissik_pgd_pabx",          name: "Grissik–PGD (PABX Link 2M)",           media: "Metro-E", depends_on: [ "seg.fiber_grissik_pgd" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares Grissik–PGD fiber with the data trunk; drops together", source: "PGN Media Link SLA report row 9",  sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.pgd_labuhanmaringgai_pabx", name: "PGD–Labuhan Maringgai (PABX Link 2M)",  media: "Metro-E", depends_on: [ "seg.fiber_labuhanmaringgai_pgd" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares LabuhanMaringgai–PGD fiber; drops together", source: "PGN Media Link SLA report row 10", sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.labuhanmaringgai_mcs_pabx", name: "Labuhan Maringgai–MCS (PABX Link 2M)",  media: "Metro-E", depends_on: [ "seg.fiber_labuhanmaringgai_mcs" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares LabuhanMaringgai–MCS fiber; drops together", source: "PGN Media Link SLA report row 11", sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.pgd_tbb_fxo",               name: "PGD–Terbanggi Besar (FXO 2M)",          media: "Metro-E", depends_on: [ "seg.fiber_tbb_pgd" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares TBB–PGD fiber; drops together", source: "PGN Media Link SLA report row 12", sim: *circ_sim, triggers: [ *circ_trig ] }
+  # -- Muara Bekasi 512k data (rows 13–14) --
+  - { key: "circ.muarabekasi_mcs",      name: "Muara Bekasi–MCS (Metro-E 512k)",      media: "Metro-E", depends_on: [ "seg.fiber_muarabekasi_mcs" ],      value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides Muara Bekasi–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 13", sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.muarabekasi_pgd",      name: "Muara Bekasi–PGD (Metro-E 512k)",      media: "Metro-E", depends_on: [ "seg.fiber_muarabekasi_pgd" ],      value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides Muara Bekasi–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 14", sim: *circ_sim, triggers: [ *circ_trig ] }
+  # -- Cogent internet uplink (row 15) --
+  - { key: "circ.cogent_pusat",         name: "Cogent PUSAT (Metro-E 1M, Jakarta)",   media: "Metro-E", depends_on: [ "seg.fiber_cogent_jakarta" ],       value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (internet)", collection: "derived from the Cogent handoff port (IF-MIB ifOperStatus)", failure_mode: "Upstream ISP outage; fails with the uplink", source: "PGN Media Link SLA report row 15", sim: *circ_sim, triggers: [ *circ_trig ] }
+  # -- VSAT-IP satellite backups (rows 16–22) — INDEPENDENT ICMP ping-loss --
+  - { key: "circ.vsat_pgd_mcs",              name: "PGD–MCS (VSAT-IP 128k)",               <<: *vsat_defaults, source: "PGN Media Link SLA report row 16", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
+  - { key: "circ.vsat_muarabekasi_pgd",      name: "Muara Bekasi–PGD (VSAT-IP 128k)",      <<: *vsat_defaults, source: "PGN Media Link SLA report row 17", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
+  - { key: "circ.vsat_muarabekasi_mcs",      name: "Muara Bekasi–MCS (VSAT-IP 128k)",      <<: *vsat_defaults, source: "PGN Media Link SLA report row 18", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
+  - { key: "circ.vsat_labuhanmaringgai_pgd", name: "Labuhan Maringgai–PGD (VSAT-IP 64k)",  <<: *vsat_defaults, source: "PGN Media Link SLA report row 19", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
+  - { key: "circ.vsat_labuhanmaringgai_mcs", name: "Labuhan Maringgai–MCS (VSAT-IP 64k)",  <<: *vsat_defaults, source: "PGN Media Link SLA report row 20", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
+  - { key: "circ.vsat_grissik_pgd",          name: "Grissik–PGD (VSAT-IP 64k)",            <<: *vsat_defaults, source: "PGN Media Link SLA report row 21", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
+  - { key: "circ.vsat_grissik_mcs",          name: "Grissik–MCS (VSAT-IP 64k)",            <<: *vsat_defaults, source: "PGN Media Link SLA report row 22", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
+  # -- MCS Cilegon backhaul (rows 23–24) --
+  - { key: "circ.backhaul_mcs_mpls",    name: "Backhaul MCS Cilegon (MPLS 2M)",       media: "MPLS",    depends_on: [ "seg.mpls_mcs_backhaul" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (backhaul)", collection: "derived from MPLS CE port (IF-MIB ifOperStatus) — see MPLS assumption in doc", failure_mode: "Rides the MPLS backhaul; fails with the CE link", source: "PGN Media Link SLA report row 23", sim: *circ_sim, triggers: [ *circ_trig ] }
+  - { key: "circ.backhaul_mcs_metroe",  name: "Backhaul MCS Cilegon (Metro-E 2M)",    media: "Metro-E", depends_on: [ "seg.fiber_mcs_backhaul" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (backhaul)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides the Metro-E backhaul; fails with the span", source: "PGN Media Link SLA report row 24", sim: *circ_sim, triggers: [ *circ_trig ] }

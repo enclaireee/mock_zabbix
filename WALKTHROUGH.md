@@ -115,6 +115,7 @@ catalog/                 the single source of truth
   ├─ plc_s7400.yml       asset class: Siemens S7-400 PLC       (6 params)
   ├─ workstation_hmi.yml asset class: Wonderware HMI PC        (10 params)
   ├─ switch_router.yml   asset class: industrial switch        (5 params)
+  ├─ comm_links.yml      comm-link SLA system: 13 segments + 24 circuits
   ├─ sim_config.yml      the ACTIVE realism config (a copy of a preset)
   └─ README.md           the schema quick reference
 presets/                 eight ready-made sim modes for `make config`
@@ -453,7 +454,9 @@ booting? credentials don't match the frontend?) instead of a raw traceback.
 
 ### 4.2 Per asset class: `apply()`
 
-For each of the four asset classes:
+For each of the five asset classes (the comm-link catalog is just another asset
+class — its segments and circuits are ordinary Zabbix items, so `apply()` needs
+no special case; the segment→circuit *dependency* is a data-plane concern, §5):
 
 1. **Get-or-create the containers** — template group, host group, template.
    Each helper looks the object up by name and creates it only if absent;
@@ -505,6 +508,11 @@ change), same rename-is-not-a-rename semantics as §4.4.
   case "site removed while its host had manual UI changes": the host is
   deleted, manual changes and all — group membership is the contract that
   says "this object is catalog-managed".
+> The comm-link **SLA services and dashboard are not provisioned** — that Zabbix
+> setup is done by hand in the UI (see [comm-links-sla.md](docs/comm-links-sla.md)).
+> To make that manual work easy, each circuit's "down" trigger is pre-tagged
+> `link:<circuit_key>` by the loader, so a Service's problem-tag mapping is a
+> copy-paste of the circuit key.
 
 ### 4.3.1 One bad object doesn't abort the run
 
@@ -599,9 +607,18 @@ Both the live loop and backfill drive every stream through the same function,
 dropout roll ──> correlation force ──> next_state ──> arm ramp? ──> sample_stream
  (only if           (may override        (sticky or       (on band       (see below)
   enabled —          the state roll)      weighted)        transition,
-  preserves RNG                                            if trend on)
-  draw order)
+  preserves RNG      + segment force      if forced,       if trend on)
+  draw order)        for comm circuits    that state)
 ```
+
+The **segment force** is the comm-link dependency (§ the fifth system): before
+the due streams are processed each tick, `segment_forces` resolves every physical
+segment's current state and hard-forces each circuit with a `depends_on` to the
+worst of its segments — merged on top of any correlation force and winning, so a
+fiber cut deterministically drops every circuit on that span together. Unlike
+`correlation` (probabilistic, same-host bias), this is a hard, cross-item
+function; VSAT circuits (no `depends_on`) skip it and roll independently. Full
+rationale: [comm-links-sla.md](docs/comm-links-sla.md).
 
 `sample_stream` resolves the value with an explicit precedence:
 

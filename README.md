@@ -2,7 +2,10 @@
 
 A self-contained lab that runs a **real Zabbix 7.0 server locally** and feeds it
 **mock OT/IT telemetry** for the asset classes in the PGNCOM Feature Discovery
-catalog (PLC Siemens S7-400, Workstation/HMI, Industrial Switch/Router).
+catalog (PLC Siemens S7-400, Workstation/HMI, Industrial Switch/Router, Gas
+Process) — plus a fifth **communication-link system** that models the 24
+inter-station "Media Link Komunikasi" links (fiber segments + logical circuits)
+so you can build the Zabbix SLA services and dashboard on top of live link data.
 
 Every parameter cycles through the three condition classes from the report —
 **Good → Underperform → Failed** — so you can watch real triggers fire and build
@@ -53,6 +56,7 @@ topic; WALKTHROUGH.md is the deep version that synthesizes across them.
 | **[docs/band-weights.md](docs/band-weights.md)** | What do the `good`/`underperform`/`failed` weight tokens mean? |
 | **[docs/env-loading.md](docs/env-loading.md)** | How does `.env` get parsed into settings? |
 | **[docs/geomap.md](docs/geomap.md)** | How does the Zabbix Geomap widget get wired up? |
+| **[docs/comm-links-sla.md](docs/comm-links-sla.md)** | The fifth system: comm-link segments/circuits, the shared-fiber dependency, and how to build the Zabbix SLA services/dashboard on top of it yourself. |
 | **[docs/provisioning-idempotency.md](docs/provisioning-idempotency.md)** | Why is `make provision` safe to re-run? |
 | **[docs/zabbix-codes.md](docs/zabbix-codes.md)** | What integer codes does the Zabbix API expect for types/severities? |
 
@@ -63,7 +67,7 @@ catalog/            asset-class definitions (the source of truth) + schema docs
   └─ sim_config.yml active realism config (continuity/correlation/trend/time-of-day/dropout/backfill)
 presets/            ready-made sim modes copied in by `make config` (baseline/steady/realistic/diurnal/stress/maintenance/demo/ml)
 otobs/              python package
-  ├─ catalog.py     load + validate catalog/*.yml into typed objects
+  ├─ catalog.py     load + validate catalog/*.yml into typed objects (incl. segments/circuits)
   ├─ provision.py   Zabbix API: templates, items, triggers, hosts (idempotent)
   ├─ simulate.py    sticky Good/Underperform/Failed state machine → Trapper (+ backfill)
   ├─ sim_config.py  load + validate sim_config.yml into typed objects
