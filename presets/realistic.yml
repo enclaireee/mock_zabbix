@@ -117,22 +117,50 @@ dropout:
 # Minimum state-dwell = repair-time (MTTR) realism for the comm links. The global
 # SIM_STICKINESS can't express this (it's one symmetric scalar for every param and
 # band); `hold` sets bounded, randomized per-type recovery windows. Numbers reflect
-# real repair profiles, NOT the report's billing period (which showed zero downtime):
-#   * fiber failed 2-8h  — a buried fiber cut needs locate + truck-roll + splice;
-#                          field MTTR for OSP fiber is hours, not a reboot.
-#   * fiber underperform 20-90m — a marginal span (dirty connector / aging SFP /
-#                          borderline splice) lingers in low-margin before it either
-#                          self-clears or degrades to a full cut.
-#   * VSAT failed 15-45m — a satellite outage is usually rain-fade; it clears as the
-#                          cell passes, far faster than a fiber repair.
-# Applies only to self-rolling streams (segments + independent VSAT circuits); fiber
-# circuits are slaved to their segment and ignore it. Keys use trailing-* prefixes.
+# real repair profiles per medium, not a billing-period snapshot:
+#   * Metro-E fiber failed 2-8h  — a buried fiber cut needs locate + truck-roll +
+#                          splice; field MTTR for OSP fiber is hours, not a reboot.
+#   * Metro-E fiber underperform 20-90m — a marginal span (dirty connector / aging
+#                          SFP / borderline splice) lingers in low-margin before it
+#                          either self-clears or degrades to a full cut.
+#   * MPLS CE port: same physical SFP/DDM profile as fiber, same windows.
+#   * SDH/SONET ring failed 3-10h — a *sustained* ring failure means a correlated
+#                          dual-path fault (APS already absorbed any single cut),
+#                          which is a bigger, rarer event than a plain fiber splice.
+#   * SDH/SONET ring underperform 15-60m — a single protected path still needs a
+#                          truck-roll to fix even though service isn't affected.
+#   * Microwave PTP failed 1-4h — no digging, just a tower truck-roll to swap the
+#                          ODU/antenna; faster than a buried-fiber splice.
+#   * Microwave PTP underperform 10-40m — rain/multipath fade self-clears as the
+#                          weather cell passes, similar timescale to VSAT rain fade.
+#   * SCPC VSAT failed 15-40m — dedicated-carrier rain fade clears with the weather
+#                          cell; no contention to prolong it.
+#   * SCPC VSAT underperform 8-30m.
+#   * IP VSAT (shared TDMA) failed 20-60m — outages can correlate with hub/beam
+#                          congestion, not just local weather, so they linger longer
+#                          than a dedicated SCPC carrier's.
+#   * IP VSAT underperform 10-40m.
+#   * Private APN failed 5-20m — cellular outages are typically a cell reboot/
+#                          congestion clear or generator swap at the tower, fast.
+#   * Private APN underperform 5-15m — brief cell-edge/congestion dips.
+#   * LEO (Starlink-class) failed 5-15m, underperform 2-10m — beam handovers and
+#                          transient obstructions clear faster than any other tier.
+# Applies only to self-rolling streams (segments + the independent SCPC/IP-VSAT/
+# APN/LEO circuits); wired circuits are slaved to their segment and ignore it.
+# Keys use trailing-* prefixes, one per tech family (segment/circuit keys carry
+# that family in the key).
 hold:
   enabled: true
   overrides:
-    "seg.fiber_*": { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
-    "seg.mpls_*":  { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
-    "circ.vsat_*": { failed: ["15m", "45m"], underperform: ["10m", "40m"] }
+    "seg.pgn_metroe_*":     { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
+    "seg.pgn_mpls_*":       { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
+    "seg.pgn_sdh_*":        { failed: ["3h", "10h"], underperform: ["15m", "60m"] }
+    "seg.pgn_microwave_*":  { failed: ["1h", "4h"], underperform: ["10m", "40m"] }
+    "circ.pgn_scpc_*":      { failed: ["15m", "40m"], underperform: ["8m", "30m"] }
+    "circ.pgn_ipvsat_*":    { failed: ["20m", "60m"], underperform: ["10m", "40m"] }
+    "circ.pgn_apn_*":       { failed: ["5m", "20m"], underperform: ["5m", "15m"] }
+    "circ.pgn_leo_*":       { failed: ["5m", "15m"], underperform: ["2m", "10m"] }
+    "circ.pgn_apn_*":      { failed: ["5m", "20m"], underperform: ["5m", "15m"] }
 
 # Backfill parameters for THIS mode (run `make backfill` yourself — never automatic).
 backfill:

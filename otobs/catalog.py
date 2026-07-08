@@ -273,7 +273,7 @@ def _build_comm_links(raw: dict, where: str) -> tuple[list[Segment], list[Circui
             raise ValueError(f"{where}: circuit {c.get('key','?')!r} depends_on must be a list of segment keys")
         param = _build_param(c, f"{where} circuit")
         param.depends_on = list(deps)
-        for t in param.triggers:  # only the 'down' trigger drives SLA downtime
+        for t in param.triggers:  
             if t.severity in ("high", "disaster"):
                 t.tags = [*t.tags, {"tag": "link", "value": param.key}]
         circuits.append(Circuit(param=param, depends_on=list(deps), media=c.get("media", "")))

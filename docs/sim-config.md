@@ -221,12 +221,12 @@ randomized `uniform(min, max)` before it may re-roll, modelling real repair time
 hold:
   enabled: true
   overrides:
-    "seg.fiber_*": { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
-    "circ.vsat_*": { failed: ["15m", "45m"] }
+    "seg.pgn_metroe_*": { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
+    "circ.pgn_scpc_*":  { failed: ["15m", "40m"] }
 ```
 
-- Keys are exact param keys **or** a trailing-`*` prefix (`seg.fiber_*` matches all
-  twelve fiber segments). Windows are `[min, max]` as interval strings (`2h`, `45m`)
+- Keys are exact param keys **or** a trailing-`*` prefix (`seg.pgn_metroe_*` matches
+  all three Metro-E segments). Windows are `[min, max]` as interval strings (`2h`, `45m`)
   or seconds; `max ≥ min` is enforced at load.
 - Only **self-rolling** streams honour a dwell. A stream that's externally forced
   this tick — a comm-link circuit slaved to its segment, or a `correlation` target —

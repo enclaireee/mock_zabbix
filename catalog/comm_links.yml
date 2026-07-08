@@ -1,22 +1,31 @@
 # =============================================================================
 # Asset Class: Communication-Link SLA System (PGN "Media Link Komunikasi")
 #
-# The FIFTH system in the lab. Models the 24 real inter-station comm links from
-# the PGN SLA report as TWO layers:
+# The FIFTH system in the lab. The real PGN Media Link SLA report (station names,
+# link routing, capacities, provider contracts) is NDA-protected. This catalog is
+# a FULLY FICTIONAL topology — invented stations (PGN_Station1-8), invented
+# segments/circuits (PGN_SegmentN / PGN_CircuitN), independently designed from
+# public WAN-technology references, not derived from or mirroring the real
+# report's structure in any way. It keeps the real system's two-layer shape and
+# covers 8 WAN technologies used on real gas-transmission comm networks
+# (grounded in public vendor/standards docs — see the `source` field on each
+# sim block below, and `docs/comm-links-sla.md` for the full writeup):
 #
-#   segments:  physical media that fails as a unit — a fiber span between two
-#              stations, or an MPLS backhaul. One Zabbix item each (enum up/down,
-#              exactly like a switch port's net.if.oper_status).
-#   circuits:  the 24 named links in the report. A fiber/Metro-E/MPLS circuit
-#              rides one or more segments (`depends_on`) and its status is the
-#              WORST of them — so one fiber cut drops every circuit on that span
-#              together (data trunk + PABX + FXO), the way a real ROW excavation
-#              would. VSAT-IP circuits ride NO segment (independent satellite RF
-#              path) and are simulated as an ICMP ping-loss check.
+#   segments:  physical/carrier media that fails as a unit — a fiber span, MPLS
+#              CE port, SDH/SONET ring path, or microwave hop between two
+#              stations. One Zabbix item each (numeric signal-quality metric
+#              appropriate to the medium, banded good/underperform/failed).
+#   circuits:  the 20 logical links. A Metro-E/MPLS/SDH/microwave circuit rides
+#              one or more segments (`depends_on`) and its status is the WORST
+#              of them — so one span fault drops every circuit riding it
+#              together, the way a real fiber cut or tower outage would.
+#              SCPC/IP-VSAT/Private-APN/LEO circuits ride NO segment
+#              (independent carrier-managed RF path) and are simulated as
+#              their own signal metric with no physical media to share.
 #
-# All items live on one NOC host (these are point-to-point links watched centrally
-# at MCS Cilegon, not per-site assets). The dependency mechanic lives in
-# otobs/simulate.py (segment_forces); SLA %/services live in otobs/sla.py.
+# All items live on one NOC host (these are point-to-point links watched centrally,
+# not per-site assets). The dependency mechanic lives in otobs/simulate.py
+# (segment_forces); SLA %/services live in otobs/sla.py.
 # Full rationale: docs/comm-links-sla.md.
 # =============================================================================
 asset_class: "Communication Links"
@@ -25,26 +34,24 @@ template_name: "Template OT Comm Links"
 template_group: "Templates/OT"
 
 hosts:
-  - host: "COMM-MCS-NOC01"
-    name: "MCS Cilegon — Media Link Komunikasi (NOC)"
+  - host: "COMM-PGN-NOC01"
+    name: "PGN Network Operations Center (NOC)"
     macros: { "{$SLA_TARGET}": "98" }
     inventory:
-      location: "Master Control Station, Cilegon, Banten"
-      location_lat: "-5.9020"
-      location_lon: "106.0780"
-      site_city: "Cilegon"
+      location: "PGN Central Network Operations Center, Indonesia"
+      location_lat: "-6.2088"
+      location_lon: "106.8456"
+      site_city: "Jakarta"
       site_country: "Indonesia"
 
 # Reusable sim/trigger blocks. `_anchors` is not a schema key — the loader ignores
 # unknown top-level keys; it exists only so the YAML anchors below have a home.
 _anchors:
-  # A segment's health is its terminating SFP's OPTICAL Rx POWER (dBm), read from
-  # DDM/DOM — the standard fiber-span degradation signal. Higher dBm = healthier;
-  # it drifts DOWN toward the receiver sensitivity floor (~-21 dBm for 1000BASE-LX)
-  # as a span ages/bends/gets dirty, so a span can WARN (low margin) before it
-  # fully cuts (loss-of-signal). Numeric so it degrades GRADUALLY and `trend` can
-  # ramp the good->underperform->failed slide (trend is a no-op on enums). Bands
-  # are named good/underperform/failed so segment->circuit derivation keys off them.
+  # -- Metro-E fiber: terminating SFP's OPTICAL Rx POWER (dBm), read from DDM/DOM —
+  # the standard fiber-span degradation signal. Higher dBm = healthier; it drifts
+  # DOWN toward the receiver sensitivity floor (~-21 dBm for 1000BASE-LX) as a span
+  # ages/bends/gets dirty. Bands named good/underperform/failed so segment->circuit
+  # derivation keys off them (otobs/simulate.py segment_forces, generic across media).
   seg_sim: &seg_sim
     kind: numeric
     good:         [-14, -4]     # healthy Rx: comfortable margin above sensitivity
@@ -62,13 +69,64 @@ _anchors:
     component: "Physical media (fiber span)"
     collection: "native SNMP optical DDM/DOM (Rx power on terminating Metro-E SFP, SFF-8472)"
     failure_mode: "Fiber cut, SFP laser aging/death, macro-bend past radius, splice loss, ROW excavation"
-    source: "PGN Media Link SLA report; SFF-8472 DDM"
     sim: *seg_sim
     triggers: *seg_trigs
-  # Circuit = up / degraded / down. State is FORCED to the WORST depended segment
-  # (weights ignored for fiber/MPLS), so a warning-level span shows its circuits as
-  # 'degraded' (impaired-but-up: errored frames / retransmits) before they go down.
-  # Bands good/underperform/failed to match the three segment bands.
+
+  # -- SDH/SONET self-healing ring: same physical signal as fiber (SDH ADMs carry
+  # standard optical SFPs with DDM), but WEIGHTED very differently. ITU-T G.841
+  # requires Automatic Protection Switching to complete within 50ms (detect+switch
+  # ~60ms total) — so a single-direction fault on a protected ring is masked before
+  # it ever shows as a sustained failure. The resilience is modelled as a heavy skew
+  # toward `good` (not a second dependency layer / best-of mechanic — that would
+  # require changing segment_forces()'s worst-of logic). A sustained `failed`
+  # reading only shows up on a genuine correlated fault hitting BOTH ring paths.
+  ring_sim: &ring_sim
+    kind: numeric
+    good:         [-14, -4]
+    underperform: [-20, -16]
+    failed:       [-30, -22]
+    weights: [0.97, 0.025, 0.005]   # vs fiber's default 0.90/0.08/0.02 — APS absorbs single faults
+    jitter: 0.35
+  ring_trigs: &ring_trigs
+    - { op: "<=", value: -16, severity: warning, label: "SDH/SONET path degrading — protection switch may activate" }
+    - { op: "<=", value: -22, severity: high,    label: "SDH/SONET ring failed — correlated fault on BOTH ring paths" }
+  ring_defaults: &ring_defaults
+    value_type: float
+    units: "dBm"
+    interval: "1m"
+    component: "Physical media (SDH/SONET protected ring span)"
+    collection: "native SNMP optical DDM/DOM on self-managed SDH/SONET ADM transceiver"
+    failure_mode: "Single-direction fault masked by APS/MS-SPRing switchover (ITU-T G.841, <=60ms); sustained failure only on a correlated dual-path fault"
+    sim: *ring_sim
+    triggers: *ring_trigs
+
+  # -- Microwave PTP: Receive Signal Level (RSL, dBm — sometimes called RSSI on
+  # cellular-derived radio gear) off the ODU. Normal operation holds within ~2 dB
+  # of the designed nominal; RSL sags as rain/multipath fade eats the fade margin,
+  # and a digital microwave path typically goes unusable in the -70..-80 dBm range.
+  mw_sim: &mw_sim
+    kind: numeric
+    good:         [-35, -25]    # nominal RSL, healthy fade margin
+    underperform: [-55, -45]    # fade margin eroding — rain/vegetation/misalignment
+    failed:       [-80, -65]    # below typical digital-microwave Rx threshold -> LOS
+    weights: [good, underperform, failed]
+    jitter: 0.4
+  mw_trigs: &mw_trigs
+    - { op: "<=", value: -45, severity: warning, label: "Microwave RSL fading — path margin eroding" }
+    - { op: "<=", value: -65, severity: high,    label: "Microwave path down — RSL below Rx threshold (LOS)" }
+  mw_defaults: &mw_defaults
+    value_type: float
+    units: "dBm"
+    interval: "1m"
+    component: "Physical media (microwave PTP)"
+    collection: "RSL polled via NMS/craft SNMP on the microwave ODU"
+    failure_mode: "Rain/multipath fade, ODU or antenna misalignment, tower power loss"
+    sim: *mw_sim
+    triggers: *mw_trigs
+
+  # Circuit = up / degraded / down, for every wired medium (Metro-E/MPLS/SDH/
+  # microwave). State is FORCED to the WORST depended segment (weights ignored), so
+  # a warning-level span shows its circuits as 'degraded' before they go down.
   circ_sim: &circ_sim
     kind: enum
     states:
@@ -78,78 +136,173 @@ _anchors:
   circ_trigs: &circ_trigs
     - { op: "=", value: 3, severity: warning, label: "Circuit degraded — riding a warning media segment" }
     - { op: "=", value: 2, severity: high,    label: "Circuit down — media segment fault" }
-  # VSAT-IP: independent ICMP ping-loss %, no segment. good = near-zero loss.
-  vsat_sim: &vsat_sim
+
+  # -- SCPC VSAT (dedicated carrier): independent ICMP ping-loss %, no segment.
+  # Single Channel Per Carrier gives each remote a fixed, uncontended slice of
+  # transponder bandwidth — real-world SCPC is reported as effectively
+  # packet-loss-free under normal conditions (no contention with other remotes),
+  # so `good` and the overall weighting are tighter/better than shared TDMA below.
+  scpc_sim: &scpc_sim
     kind: numeric
-    good: [0, 1]
-    underperform: [3, 20]
-    failed: [60, 100]
-    weights: [good, underperform, failed]
-    jitter: 0.5
-  vsat_defaults: &vsat_defaults
-    media: "VSAT-IP"
+    good: [0, 0.5]
+    underperform: [2, 15]
+    failed: [55, 100]
+    weights: [0.93, 0.06, 0.01]
+    jitter: 0.4
+  scpc_trigs: &scpc_trigs
+    - { op: ">=", value: 2,  severity: warning, label: "SCPC packet loss — rain fade on dedicated carrier" }
+    - { op: ">=", value: 55, severity: high,    label: "SCPC link down — RF path lost" }
+  scpc_defaults: &scpc_defaults
+    media: "SCPC VSAT (dedicated)"
     depends_on: []
     value_type: float
     units: "%"
     interval: "1m"
-    component: "Logical circuit (satellite)"
-    collection: "Simple check (icmppingloss) — no MIB access to a leased VSAT modem"
-    failure_mode: "Rain fade, satellite RF path loss, modem de-lock"
+    component: "Logical circuit (satellite, dedicated)"
+    collection: "Simple check (icmppingloss) — dedicated carrier, no MIB access to the leased modem"
+    failure_mode: "Rain fade / atmospheric attenuation on the dedicated carrier, modem de-lock"
+    sim: *scpc_sim
+    triggers: *scpc_trigs
+
+  # -- IP VSAT (shared TDMA): same ping-loss mechanic as SCPC, but the remote
+  # shares its inroute timeslot pool with other sites on the same beam/hub —
+  # real-world shared TDMA VSAT carries genuine contention risk that a dedicated
+  # SCPC carrier doesn't, so baseline loss is non-zero even in `good` and the
+  # weighting skews worse than SCPC's.
+  ipvsat_sim: &ipvsat_sim
+    kind: numeric
+    good: [0, 3]
+    underperform: [5, 30]
+    failed: [55, 100]
+    weights: [0.85, 0.12, 0.03]
+    jitter: 0.6
+  ipvsat_trigs: &ipvsat_trigs
+    - { op: ">=", value: 5,  severity: warning, label: "IP VSAT packet loss — TDMA inroute contention / rain fade" }
+    - { op: ">=", value: 55, severity: high,    label: "IP VSAT link down — RF path lost" }
+  ipvsat_defaults: &ipvsat_defaults
+    media: "IP VSAT (shared TDMA)"
+    depends_on: []
+    value_type: float
+    units: "%"
+    interval: "1m"
+    component: "Logical circuit (satellite, shared)"
+    collection: "Simple check (icmppingloss) — shared inroute, no MIB access to the leased modem"
+    failure_mode: "TDMA inroute contention during peak simultaneous use across remote sites, rain fade, modem de-lock"
+    sim: *ipvsat_sim
+    triggers: *ipvsat_trigs
+
+  # -- Private APN (cellular 4G/LTE): independent RSRP (dBm) off the cellular
+  # router modem, no segment. Bands per practical 3GPP RSRP benchmarks (good
+  # above ~-85 dBm, weak below ~-105..-110 dBm no-service floor).
+  apn_sim: &apn_sim
+    kind: numeric
+    good: [-85, -70]
+    underperform: [-100, -90]
+    failed: [-119, -108]
+    weights: [good, underperform, failed]
+    jitter: 0.35
+  apn_trigs: &apn_trigs
+    - { op: "<=", value: -90,  severity: warning, label: "APN signal degrading — cell-edge RSRP" }
+    - { op: "<=", value: -108, severity: high,    label: "APN link down — RSRP below usable threshold" }
+  apn_defaults: &apn_defaults
+    media: "Private APN (4G/LTE)"
+    depends_on: []
+    value_type: float
+    units: "dBm"
+    interval: "1m"
+    component: "Logical circuit (cellular)"
+    collection: "Modem RSRP via AT command / SNMP MIB on the cellular router — carrier-managed radio path, no owned segment"
+    failure_mode: "Cell congestion, coverage gap, tower power loss, APN de-registration"
+    sim: *apn_sim
+    triggers: *apn_trigs
+
+  # -- LEO (Starlink-class) portable terminal: emergency/last-resort backup tier,
+  # independent ping-loss %, no segment. Public LEO performance data reports
+  # >99.9% uptime and <1% packet loss in clear conditions — far better per-hop
+  # reliability than legacy GEO VSAT — so its `good` band is the tightest of any
+  # satellite tier here. It's a "last resort" by ROLE (portable emergency
+  # backhaul), not because the radio link itself is unreliable; its occasional
+  # dips are beam-handover gaps and physical obstruction, not rain fade.
+  leo_sim: &leo_sim
+    kind: numeric
+    good: [0, 1]
+    underperform: [3, 15]
+    failed: [50, 100]
+    weights: [0.95, 0.04, 0.01]
+    jitter: 0.3
+  leo_trigs: &leo_trigs
+    - { op: ">=", value: 3,  severity: warning, label: "LEO packet loss — beam handover / obstruction" }
+    - { op: ">=", value: 50, severity: high,    label: "LEO link down — terminal lost lock" }
+  leo_defaults: &leo_defaults
+    media: "LEO Satellite (Starlink-class)"
+    depends_on: []
+    value_type: float
+    units: "%"
+    interval: "1m"
+    component: "Logical circuit (satellite, LEO emergency backup)"
+    collection: "Simple check (icmppingloss) — portable emergency terminal, no MIB access"
+    failure_mode: "Beam-handover gap, physical obstruction (foliage/structure), weather attenuation — backup tier, not primary"
+    sim: *leo_sim
+    triggers: *leo_trigs
 
 # -----------------------------------------------------------------------------
-# PHYSICAL MEDIA SEGMENTS (13) — the fiber spans + backhauls that actually fail.
-# Derived from the report's `Lokasi` column; four spans are SHARED by 2 circuits.
+# STATIONS (fictional, for flavor only — not a real catalog/sites.yml entry):
+# PGN_Station1..8. Purely descriptive labels used in segment/circuit names below;
+# no relation to any real PGN facility.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# PHYSICAL SEGMENTS (11) — fictional spans across 4 wired media types. Real
+# Indonesian carriers stand in for the (NDA-protected) actual vendor data.
 # -----------------------------------------------------------------------------
 segments:
-  - { key: "seg.fiber_spg_pgd",              name: "Segment: SPG–Pagardewa fiber",                     <<: *seg_defaults, source: "PGN Media Link SLA report row 1; SFF-8472 DDM" }
-  - { key: "seg.fiber_grissik_mcs",          name: "Segment: Grissik–MCS Cilegon fiber",               <<: *seg_defaults, source: "PGN Media Link SLA report row 2; SFF-8472 DDM" }
-  - { key: "seg.fiber_tbb_mcs",              name: "Segment: Terbanggi Besar–MCS Cilegon fiber",       <<: *seg_defaults, source: "PGN Media Link SLA report row 3; SFF-8472 DDM" }
-  - { key: "seg.fiber_labuhanmaringgai_mcs", name: "Segment: Labuhan Maringgai–MCS fiber (SHARED)",     <<: *seg_defaults, source: "PGN Media Link SLA report rows 4 & 11; SFF-8472 DDM" }
-  - { key: "seg.fiber_grissik_pgd",          name: "Segment: Grissik–Pagardewa fiber (SHARED)",        <<: *seg_defaults, source: "PGN Media Link SLA report rows 5 & 9; SFF-8472 DDM" }
-  - { key: "seg.fiber_tbb_pgd",              name: "Segment: Terbanggi Besar–Pagardewa fiber (SHARED)", <<: *seg_defaults, source: "PGN Media Link SLA report rows 6 & 12; SFF-8472 DDM" }
-  - { key: "seg.fiber_labuhanmaringgai_pgd", name: "Segment: Labuhan Maringgai–Pagardewa fiber (SHARED)", <<: *seg_defaults, source: "PGN Media Link SLA report rows 7 & 10; SFF-8472 DDM" }
-  - { key: "seg.fiber_pgd_mcs",              name: "Segment: Pagardewa–MCS Cilegon fiber",             <<: *seg_defaults, source: "PGN Media Link SLA report row 8; SFF-8472 DDM" }
-  - { key: "seg.fiber_muarabekasi_mcs",      name: "Segment: Muara Bekasi–MCS Cilegon fiber",          <<: *seg_defaults, source: "PGN Media Link SLA report row 13; SFF-8472 DDM" }
-  - { key: "seg.fiber_muarabekasi_pgd",      name: "Segment: Muara Bekasi–Pagardewa fiber",            <<: *seg_defaults, source: "PGN Media Link SLA report row 14; SFF-8472 DDM" }
-  - { key: "seg.fiber_cogent_jakarta",       name: "Segment: Cogent internet uplink (Jakarta)",        <<: *seg_defaults, failure_mode: "Upstream ISP outage, last-mile fiber cut, handoff SFP aging", source: "PGN Media Link SLA report row 15; SFF-8472 DDM" }
-  - { key: "seg.fiber_mcs_backhaul",         name: "Segment: MCS Cilegon backhaul fiber (Metro-E)",    <<: *seg_defaults, source: "PGN Media Link SLA report row 24; SFF-8472 DDM" }
-  # MPLS backhaul: CONFIRMED self-managed CPE at both ends (operator, 2026-07-07),
-  # so we read the CE router's own SFP optical DDM — same model as a Metro-E span,
-  # NOT a carrier black box we could only ping. See docs/comm-links-sla.md.
-  - { key: "seg.mpls_mcs_backhaul",          name: "Segment: MCS Cilegon backhaul (MPLS CE port)",     <<: *seg_defaults, component: "Physical media (MPLS backhaul)", collection: "native SNMP optical DDM/DOM on self-managed MPLS CE port SFP", failure_mode: "PE-CE link down, CE SFP aging, provider MPLS core fault", source: "PGN Media Link SLA report row 23; SFF-8472 DDM" }
+  # Metro-E fiber (1-3)
+  - { key: "seg.pgn_metroe_segment1", name: "PGN_Segment1 — Metro-E fiber, PGN_Station1–PGN_Station2 (Telkom)",      <<: *seg_defaults, source: "Fictional topology; SFF-8472 DDM" }
+  - { key: "seg.pgn_metroe_segment2", name: "PGN_Segment2 — Metro-E fiber, PGN_Station2–PGN_Station3 (Icon+)",       <<: *seg_defaults, source: "Fictional topology; SFF-8472 DDM" }
+  - { key: "seg.pgn_metroe_segment3", name: "PGN_Segment3 — Metro-E fiber, PGN_Station3–PGN_Station4 (Moratelindo)", <<: *seg_defaults, source: "Fictional topology; SFF-8472 DDM" }
+  # MPLS CE ports / DWDM backbone (4-6)
+  - { key: "seg.pgn_mpls_segment4", name: "PGN_Segment4 — MPLS CE port, PGN_Station2–PGN_Station5 (Telkom)",     <<: *seg_defaults, component: "Physical media (MPLS/DWDM backbone)", collection: "native SNMP optical DDM/DOM on self-managed MPLS CE port SFP", failure_mode: "PE-CE link down, CE SFP aging, provider MPLS/DWDM core fault", source: "Fictional topology; SFF-8472 DDM" }
+  - { key: "seg.pgn_mpls_segment5", name: "PGN_Segment5 — MPLS CE port, PGN_Station5–PGN_Station6 (Lintasarta)", <<: *seg_defaults, component: "Physical media (MPLS/DWDM backbone)", collection: "native SNMP optical DDM/DOM on self-managed MPLS CE port SFP", failure_mode: "PE-CE link down, CE SFP aging, provider MPLS/DWDM core fault", source: "Fictional topology; SFF-8472 DDM" }
+  - { key: "seg.pgn_mpls_segment6", name: "PGN_Segment6 — MPLS CE port, PGN_Station2–PGN_Station6 (Telkomsat)",  <<: *seg_defaults, component: "Physical media (MPLS/DWDM backbone)", collection: "native SNMP optical DDM/DOM on self-managed MPLS CE port SFP", failure_mode: "PE-CE link down, CE SFP aging, provider MPLS/DWDM core fault", source: "Fictional topology; SFF-8472 DDM" }
+  # SDH/SONET self-healing ring (7-9)
+  - { key: "seg.pgn_sdh_segment7", name: "PGN_Segment7 — SDH/SONET ring path, PGN_Station3–PGN_Station6 (PGN-owned)", <<: *ring_defaults, source: "Fictional topology; ITU-T G.841 APS 50ms switchover" }
+  - { key: "seg.pgn_sdh_segment8", name: "PGN_Segment8 — SDH/SONET ring path, PGN_Station6–PGN_Station4 (PGN-owned)", <<: *ring_defaults, source: "Fictional topology; ITU-T G.841 APS 50ms switchover" }
+  - { key: "seg.pgn_sdh_segment9", name: "PGN_Segment9 — SDH/SONET ring path, PGN_Station4–PGN_Station3 (PGN-owned)", <<: *ring_defaults, source: "Fictional topology; ITU-T G.841 APS 50ms switchover" }
+  # Microwave PTP (10-11)
+  - { key: "seg.pgn_microwave_segment10", name: "PGN_Segment10 — Microwave PTP, PGN_Station4–PGN_Station7 (PGN-owned, Protelindo tower)", <<: *mw_defaults, source: "Fictional topology; Aviat Networks RSL guidance" }
+  - { key: "seg.pgn_microwave_segment11", name: "PGN_Segment11 — Microwave PTP, PGN_Station7–PGN_Station8 (Telkomsat radio-over-IP)",      <<: *mw_defaults, source: "Fictional topology; Aviat Networks RSL guidance" }
 
 # -----------------------------------------------------------------------------
-# LOGICAL CIRCUITS (24) — the report rows. `depends_on` = the segment(s) each
-# rides; state = worst of them. VSAT circuits ride nothing (independent).
+# LOGICAL CIRCUITS (20) — `depends_on` = the segment(s) each rides (multi-hop
+# chains ride 2-3 in series); state = worst of them. SCPC/IP-VSAT/APN/LEO
+# circuits ride nothing (independent carrier-managed RF path).
 # -----------------------------------------------------------------------------
 circuits:
-  # -- Metro-E / fiber data trunks (report rows 1–8) --
-  - { key: "circ.spg_pgd",              name: "SPG–PGD (Metro-E 1M)",                 media: "Metro-E", depends_on: [ "seg.fiber_spg_pgd" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides SPG–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 1",  sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.grissik_mcs",          name: "Grissik–MCS (Metro-E 4M)",             media: "Metro-E", depends_on: [ "seg.fiber_grissik_mcs" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides Grissik–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 2",  sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.tbb_mcs",              name: "Terbanggi Besar–MCS (Metro-E 4M)",     media: "Metro-E", depends_on: [ "seg.fiber_tbb_mcs" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides TBB–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 3",  sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.labuhanmaringgai_mcs", name: "Labuhan Maringgai–MCS (Metro-E 4M)",   media: "Metro-E", depends_on: [ "seg.fiber_labuhanmaringgai_mcs" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides LabuhanMaringgai–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 4", sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.grissik_pgd",          name: "Grissik–PGD (Metro-E 4M)",             media: "Metro-E", depends_on: [ "seg.fiber_grissik_pgd" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides Grissik–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 5",  sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.tbb_pgd",              name: "Terbanggi Besar–PGD (Metro-E 4M)",     media: "Metro-E", depends_on: [ "seg.fiber_tbb_pgd" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides TBB–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 6",  sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.labuhanmaringgai_pgd", name: "Labuhan Maringgai–PGD (Metro-E 4M)",   media: "Metro-E", depends_on: [ "seg.fiber_labuhanmaringgai_pgd" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides LabuhanMaringgai–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 7", sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.pgd_mcs",              name: "PGD–MCS (Metro-E 4M)",                 media: "Metro-E", depends_on: [ "seg.fiber_pgd_mcs" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides PGD–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 8",  sim: *circ_sim, triggers: *circ_trigs }
-  # -- PABX / FXO voice circuits — SHARE a physical span with a data trunk above --
-  - { key: "circ.grissik_pgd_pabx",          name: "Grissik–PGD (PABX Link 2M)",           media: "Metro-E", depends_on: [ "seg.fiber_grissik_pgd" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares Grissik–PGD fiber with the data trunk; drops together", source: "PGN Media Link SLA report row 9",  sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.pgd_labuhanmaringgai_pabx", name: "PGD–Labuhan Maringgai (PABX Link 2M)",  media: "Metro-E", depends_on: [ "seg.fiber_labuhanmaringgai_pgd" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares LabuhanMaringgai–PGD fiber; drops together", source: "PGN Media Link SLA report row 10", sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.labuhanmaringgai_mcs_pabx", name: "Labuhan Maringgai–MCS (PABX Link 2M)",  media: "Metro-E", depends_on: [ "seg.fiber_labuhanmaringgai_mcs" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares LabuhanMaringgai–MCS fiber; drops together", source: "PGN Media Link SLA report row 11", sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.pgd_tbb_fxo",               name: "PGD–Terbanggi Besar (FXO 2M)",          media: "Metro-E", depends_on: [ "seg.fiber_tbb_pgd" ],              value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares TBB–PGD fiber; drops together", source: "PGN Media Link SLA report row 12", sim: *circ_sim, triggers: *circ_trigs }
-  # -- Muara Bekasi 512k data (rows 13–14) --
-  - { key: "circ.muarabekasi_mcs",      name: "Muara Bekasi–MCS (Metro-E 512k)",      media: "Metro-E", depends_on: [ "seg.fiber_muarabekasi_mcs" ],      value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides Muara Bekasi–MCS fiber; fails with the span", source: "PGN Media Link SLA report row 13", sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.muarabekasi_pgd",      name: "Muara Bekasi–PGD (Metro-E 512k)",      media: "Metro-E", depends_on: [ "seg.fiber_muarabekasi_pgd" ],      value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides Muara Bekasi–PGD fiber; fails with the span", source: "PGN Media Link SLA report row 14", sim: *circ_sim, triggers: *circ_trigs }
-  # -- Cogent internet uplink (row 15) --
-  - { key: "circ.cogent_pusat",         name: "Cogent PUSAT (Metro-E 1M, Jakarta)",   media: "Metro-E", depends_on: [ "seg.fiber_cogent_jakarta" ],       value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (internet)", collection: "derived from the Cogent handoff port (IF-MIB ifOperStatus)", failure_mode: "Upstream ISP outage; fails with the uplink", source: "PGN Media Link SLA report row 15", sim: *circ_sim, triggers: *circ_trigs }
-  # -- VSAT-IP satellite backups (rows 16–22) — INDEPENDENT ICMP ping-loss --
-  - { key: "circ.vsat_pgd_mcs",              name: "PGD–MCS (VSAT-IP 128k)",               <<: *vsat_defaults, source: "PGN Media Link SLA report row 16", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
-  - { key: "circ.vsat_muarabekasi_pgd",      name: "Muara Bekasi–PGD (VSAT-IP 128k)",      <<: *vsat_defaults, source: "PGN Media Link SLA report row 17", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
-  - { key: "circ.vsat_muarabekasi_mcs",      name: "Muara Bekasi–MCS (VSAT-IP 128k)",      <<: *vsat_defaults, source: "PGN Media Link SLA report row 18", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
-  - { key: "circ.vsat_labuhanmaringgai_pgd", name: "Labuhan Maringgai–PGD (VSAT-IP 64k)",  <<: *vsat_defaults, source: "PGN Media Link SLA report row 19", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
-  - { key: "circ.vsat_labuhanmaringgai_mcs", name: "Labuhan Maringgai–MCS (VSAT-IP 64k)",  <<: *vsat_defaults, source: "PGN Media Link SLA report row 20", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
-  - { key: "circ.vsat_grissik_pgd",          name: "Grissik–PGD (VSAT-IP 64k)",            <<: *vsat_defaults, source: "PGN Media Link SLA report row 21", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
-  - { key: "circ.vsat_grissik_mcs",          name: "Grissik–MCS (VSAT-IP 64k)",            <<: *vsat_defaults, source: "PGN Media Link SLA report row 22", sim: *vsat_sim, triggers: [ { op: ">=", value: 20, severity: warning, label: "VSAT packet loss — rain fade / degraded RF" }, { op: ">=", value: 60, severity: high, label: "VSAT link down — RF path lost" } ] }
-  # -- MCS Cilegon backhaul (rows 23–24) --
-  - { key: "circ.backhaul_mcs_mpls",    name: "Backhaul MCS Cilegon (MPLS 2M)",       media: "MPLS",    depends_on: [ "seg.mpls_mcs_backhaul" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (backhaul)", collection: "derived from MPLS CE port (IF-MIB ifOperStatus) — see MPLS assumption in doc", failure_mode: "Rides the MPLS backhaul; fails with the CE link", source: "PGN Media Link SLA report row 23", sim: *circ_sim, triggers: *circ_trigs }
-  - { key: "circ.backhaul_mcs_metroe",  name: "Backhaul MCS Cilegon (Metro-E 2M)",    media: "Metro-E", depends_on: [ "seg.fiber_mcs_backhaul" ],          value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (backhaul)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides the Metro-E backhaul; fails with the span", source: "PGN Media Link SLA report row 24", sim: *circ_sim, triggers: *circ_trigs }
+  # -- Metro-E data/voice trunks (1-3) --
+  - { key: "circ.pgn_metroe_circuit1", name: "PGN_Circuit1 (Metro-E data trunk, Station1–Station2)",  media: "Metro-E", depends_on: [ "seg.pgn_metroe_segment1" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment1; fails with the span", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  - { key: "circ.pgn_metroe_circuit2", name: "PGN_Circuit2 (Metro-E channelized voice, Station1–Station2)", media: "Metro-E", depends_on: [ "seg.pgn_metroe_segment1" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (voice)", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Shares PGN_Segment1 fiber with circuit1; drops together", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  - { key: "circ.pgn_metroe_circuit3", name: "PGN_Circuit3 (Metro-E long-haul trunk, Station1–Station4, 3-hop)", media: "Metro-E", depends_on: [ "seg.pgn_metroe_segment1", "seg.pgn_metroe_segment2", "seg.pgn_metroe_segment3" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating Metro-E port (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment1-3 in series; fails if any span cuts", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  # -- MPLS/DWDM backbone trunks (4-6) --
+  - { key: "circ.pgn_mpls_circuit4", name: "PGN_Circuit4 (MPLS/DWDM trunk, Station2–Station5)", media: "MPLS", depends_on: [ "seg.pgn_mpls_segment4" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (backhaul)", collection: "derived from MPLS CE port (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment4; fails with the CE link", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  - { key: "circ.pgn_mpls_circuit5", name: "PGN_Circuit5 (MPLS/DWDM trunk, Station5–Station6)", media: "MPLS", depends_on: [ "seg.pgn_mpls_segment5" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (backhaul)", collection: "derived from MPLS CE port (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment5; fails with the CE link", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  - { key: "circ.pgn_mpls_circuit6", name: "PGN_Circuit6 (MPLS/DWDM trunk, Station2–Station6, dedicated alt path)", media: "MPLS", depends_on: [ "seg.pgn_mpls_segment6" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (backhaul)", collection: "derived from MPLS CE port (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment6; fails with the CE link", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  # -- SDH/SONET self-healing ring circuits (7-9) --
+  - { key: "circ.pgn_sdh_circuit7", name: "PGN_Circuit7 (SDH/SONET ring, Station3–Station6)", media: "SDH/SONET", depends_on: [ "seg.pgn_sdh_segment7" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (protected)", collection: "derived from the SDH/SONET ADM's protected-path status (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment7; protected by ring APS, only degrades/fails on a sustained or correlated fault", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  - { key: "circ.pgn_sdh_circuit8", name: "PGN_Circuit8 (SDH/SONET ring, Station6–Station4)", media: "SDH/SONET", depends_on: [ "seg.pgn_sdh_segment8" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (protected)", collection: "derived from the SDH/SONET ADM's protected-path status (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment8; protected by ring APS, only degrades/fails on a sustained or correlated fault", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  - { key: "circ.pgn_sdh_circuit9", name: "PGN_Circuit9 (SDH/SONET ring, Station4–Station3)", media: "SDH/SONET", depends_on: [ "seg.pgn_sdh_segment9" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit (protected)", collection: "derived from the SDH/SONET ADM's protected-path status (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment9; protected by ring APS, only degrades/fails on a sustained or correlated fault", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  # -- Microwave PTP trunks (10-12) --
+  - { key: "circ.pgn_microwave_circuit10", name: "PGN_Circuit10 (Microwave trunk, Station4–Station7)", media: "Microwave PTP", depends_on: [ "seg.pgn_microwave_segment10" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating microwave IDU port (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment10; fails with the hop", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  - { key: "circ.pgn_microwave_circuit11", name: "PGN_Circuit11 (Microwave trunk, Station7–Station8)", media: "Microwave PTP", depends_on: [ "seg.pgn_microwave_segment11" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating microwave IDU port (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment11; fails with the hop", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  - { key: "circ.pgn_microwave_circuit12", name: "PGN_Circuit12 (Microwave trunk, Station4–Station8, 2-hop relay)", media: "Microwave PTP", depends_on: [ "seg.pgn_microwave_segment10", "seg.pgn_microwave_segment11" ], value_type: unsigned, units: "", interval: "1m", component: "Logical circuit", collection: "derived from terminating microwave IDU port (IF-MIB ifOperStatus)", failure_mode: "Rides PGN_Segment10+11 relay chain; fails if either hop cuts", source: "Fictional topology", sim: *circ_sim, triggers: *circ_trigs }
+  # -- SCPC VSAT, dedicated, independent (13-15) --
+  - { key: "circ.pgn_scpc_circuit13", name: "PGN_Circuit13 (SCPC VSAT, Station5, Telkomsat)", <<: *scpc_defaults, source: "Fictional topology" }
+  - { key: "circ.pgn_scpc_circuit14", name: "PGN_Circuit14 (SCPC VSAT, Station6, Lintasarta)", <<: *scpc_defaults, source: "Fictional topology" }
+  - { key: "circ.pgn_scpc_circuit15", name: "PGN_Circuit15 (SCPC VSAT, Station8, PSN)",        <<: *scpc_defaults, source: "Fictional topology" }
+  # -- IP VSAT, shared TDMA, independent (16-17) --
+  - { key: "circ.pgn_ipvsat_circuit16", name: "PGN_Circuit16 (IP VSAT shared, Station7, Telkomsat)",  <<: *ipvsat_defaults, source: "Fictional topology" }
+  - { key: "circ.pgn_ipvsat_circuit17", name: "PGN_Circuit17 (IP VSAT shared, Station8, Lintasarta)", <<: *ipvsat_defaults, source: "Fictional topology" }
+  # -- Private APN (cellular), independent (18-19) --
+  - { key: "circ.pgn_apn_circuit18", name: "PGN_Circuit18 (Private APN, Station5, Telkomsel)", <<: *apn_defaults, source: "Fictional topology" }
+  - { key: "circ.pgn_apn_circuit19", name: "PGN_Circuit19 (Private APN, Station6, Indosat)",   <<: *apn_defaults, source: "Fictional topology" }
+  # -- LEO emergency backup, independent (20) --
+  - { key: "circ.pgn_leo_circuit20", name: "PGN_Circuit20 (LEO emergency backup, Station8, Starlink Business)", <<: *leo_defaults, source: "Fictional topology" }

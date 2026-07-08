@@ -159,30 +159,30 @@ unit, and the logical circuits that ride them. Full rationale:
 [docs/comm-links-sla.md](../docs/comm-links-sla.md).
 
 ```yaml
-segments:            # physical media (fiber span / MPLS backhaul) — each a Zabbix item
-  - key: "seg.fiber_grissik_pgd"
-    name: "Segment: Grissik–Pagardewa fiber"
+segments:            # physical/carrier media (fiber span / MPLS CE port / SDH ring path / microwave hop) — each a Zabbix item
+  - key: "seg.pgn_metroe_segment1"
+    name: "PGN_Segment1 — Metro-E fiber, PGN_Station1–PGN_Station2 (Telkom)"
     value_type: unsigned
     # ...all the normal parameter fields (interval/component/collection/…)...
     sim: { kind: enum, states: [ {value: 1, weight: good, ...}, {value: 2, weight: failed, ...} ] }
     triggers: [ { op: "=", value: 2, severity: high, label: "Segment down" } ]
 
-circuits:            # the report's named links — also Zabbix items
-  - key: "circ.grissik_pgd"
-    name: "Grissik–PGD (Metro-E 4M)"
+circuits:            # the logical links — also Zabbix items
+  - key: "circ.pgn_metroe_circuit1"
+    name: "PGN_Circuit1 (Metro-E data trunk, Station1–Station2)"
     media: "Metro-E"                       # transport label (documentation)
-    depends_on: [ "seg.fiber_grissik_pgd" ]  # segment key(s) it rides
+    depends_on: [ "seg.pgn_metroe_segment1" ]  # segment key(s) it rides
     value_type: unsigned
     sim: { kind: enum, states: [ ... up/down ... ] }   # weights ignored (state = worst segment)
     triggers: [ { op: "=", value: 2, severity: high, label: "Circuit down" } ]
-  - key: "circ.vsat_pgd_mcs"
-    media: "VSAT-IP"
+  - key: "circ.pgn_scpc_circuit13"
+    media: "SCPC VSAT (dedicated)"
     depends_on: []                         # no segment -> simulated independently
     value_type: float
     units: "%"
     collection: "Simple check (icmppingloss)"          # different collection = real constraint
-    sim: { kind: numeric, good: [0,1], underperform: [3,20], failed: [60,100], ... }
-    triggers: [ { op: ">=", value: 60, severity: high, label: "VSAT link down" } ]
+    sim: { kind: numeric, good: [0,0.5], underperform: [2,15], failed: [55,100], ... }
+    triggers: [ { op: ">=", value: 55, severity: high, label: "SCPC link down" } ]
 ```
 
 - A **segment** is an ordinary parameter (see "A parameter" above); it becomes a

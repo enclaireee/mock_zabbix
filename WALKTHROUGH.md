@@ -115,7 +115,7 @@ catalog/                 the single source of truth
   ├─ plc_s7400.yml       asset class: Siemens S7-400 PLC       (6 params)
   ├─ workstation_hmi.yml asset class: Wonderware HMI PC        (10 params)
   ├─ switch_router.yml   asset class: industrial switch        (5 params)
-  ├─ comm_links.yml      comm-link SLA system: 13 segments + 24 circuits
+  ├─ comm_links.yml      comm-link SLA system: 11 segments + 20 circuits (8 WAN techs)
   ├─ sim_config.yml      the ACTIVE realism config (a copy of a preset)
   └─ README.md           the schema quick reference
 presets/                 eight ready-made sim modes for `make config`

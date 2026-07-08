@@ -140,7 +140,7 @@ class Hold:
     can't express (it's symmetric across params and bands). Only applies to
     streams that roll their own state; forced streams (segment-derived circuits)
     ignore it. Keys are exact param keys or a trailing-`*` prefix (e.g.
-    `seg.fiber_*`). Off by default = no dwell, exactly the old behaviour."""
+    `seg.pgn_metroe_*`). Off by default = no dwell, exactly the old behaviour."""
     enabled: bool = False
     exact: dict = field(default_factory=dict)      # key   -> {band: (lo, hi) seconds}
     prefixes: list = field(default_factory=list)   # [(prefix, {band: (lo, hi)})]
