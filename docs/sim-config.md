@@ -3,7 +3,7 @@
 Everything the data-plane simulator (`make simulate` / `make backfill`) does beyond
 the plain state machine lives in **one active file, `catalog/sim_config.yml`**, and
 is loaded by [`otobs/sim_config.py`](../otobs/sim_config.py). This page is the full
-reference: the **mode system** for picking a config, and the **six features** a config
+reference: the **mode system** for picking a config, and the **seven features** a config
 can turn on.
 
 For the per-parameter bands/weights/triggers themselves (a different concern), see
@@ -51,6 +51,10 @@ Override per run with `DAYS=` / `SPEED=`.
 | **demo** | Punchy 5-minute live walkthrough: fast, obvious cascades. | ✅ | ✅ (strong) | ✅ (short) | – | ✅ (light) | 1 | lower `SIM_STICKINESS` ≈0.85 |
 | **ml** | Training data for Tahap 2/3 (clustering, RUL): long smooth labelled curves. | ✅ | ✅ (web) | ✅ (long) | – | – | 30 | raise `SIM_STICKINESS` ≈0.97 |
 
+> The table omits a seventh feature, **`hold`** (MTTR dwell, §6 below), to stay
+> readable: only **realistic** ships it on, setting comm-link repair-time windows
+> (fiber cut 2–8 h, VSAT rain-fade 15–45 min). Any mode can add a `hold:` block.
+
 **Custom modes.** Copy any preset in [`presets/`](../presets/), edit, and point at it
 with `make config FILE=…`, or just edit `catalog/sim_config.yml` directly. `make check`
 validates whatever is active.
@@ -81,7 +85,7 @@ cascades and occasionally goes quiet — like a plant, not a random number gener
 
 ---
 
-## The six features
+## The seven features
 
 Every feature defaults **off** and is a strict no-op when disabled. With all off (or
 the file absent) the simulator is exactly the sticky state machine of the baseline —
@@ -204,7 +208,36 @@ dropout:
     hmi.smart.health_passed: { probability: 0.0 }   # never drop the safety verdict
 ```
 
-### 6. `backfill` — history with correct timestamps
+### 6. `hold` — minimum state dwell (MTTR)
+
+The state machine's dwell time in a band is governed only by `SIM_STICKINESS`, a
+single global scalar that's symmetric across every parameter and every band. That
+can't say "a fiber cut stays down for *hours* but a satellite rain-fade clears in
+*minutes*" — different params, different bands, bounded ranges. `hold` adds exactly
+that: on **entering** a band that has a window, a stream must stay there for a
+randomized `uniform(min, max)` before it may re-roll, modelling real repair time.
+
+```yaml
+hold:
+  enabled: true
+  overrides:
+    "seg.fiber_*": { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
+    "circ.vsat_*": { failed: ["15m", "45m"] }
+```
+
+- Keys are exact param keys **or** a trailing-`*` prefix (`seg.fiber_*` matches all
+  twelve fiber segments). Windows are `[min, max]` as interval strings (`2h`, `45m`)
+  or seconds; `max ≥ min` is enforced at load.
+- Only **self-rolling** streams honour a dwell. A stream that's externally forced
+  this tick — a comm-link circuit slaved to its segment, or a `correlation` target —
+  ignores its own hold and follows the force, so a shared fiber cut keeps every
+  circuit on that span down for the *segment's* window (one MTTR, not per-circuit).
+- Windows scale with `SIM_TIME_SCALE` just like intervals, so a demo at 10× still
+  shows proportionate outage lengths. Off by default = no dwell (the old behaviour).
+- Its main use is the comm-link SLA system — see
+  [comm-links-sla.md](comm-links-sla.md#repair-time-mttr-outages-last-realistically-long).
+
+### 7. `backfill` — history with correct timestamps
 
 `make backfill` sweeps the same machine over `[now − days, now]` as discrete events at
 each param's **real** interval, stamping every value with its historical `clock`.

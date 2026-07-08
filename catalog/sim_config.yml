@@ -114,6 +114,26 @@ dropout:
   overrides:
     hmi.smart.health_passed: { probability: 0.0 }   # never drop the safety verdict
 
+# Minimum state-dwell = repair-time (MTTR) realism for the comm links. The global
+# SIM_STICKINESS can't express this (it's one symmetric scalar for every param and
+# band); `hold` sets bounded, randomized per-type recovery windows. Numbers reflect
+# real repair profiles, NOT the report's billing period (which showed zero downtime):
+#   * fiber failed 2-8h  — a buried fiber cut needs locate + truck-roll + splice;
+#                          field MTTR for OSP fiber is hours, not a reboot.
+#   * fiber underperform 20-90m — a marginal span (dirty connector / aging SFP /
+#                          borderline splice) lingers in low-margin before it either
+#                          self-clears or degrades to a full cut.
+#   * VSAT failed 15-45m — a satellite outage is usually rain-fade; it clears as the
+#                          cell passes, far faster than a fiber repair.
+# Applies only to self-rolling streams (segments + independent VSAT circuits); fiber
+# circuits are slaved to their segment and ignore it. Keys use trailing-* prefixes.
+hold:
+  enabled: true
+  overrides:
+    "seg.fiber_*": { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
+    "seg.mpls_*":  { failed: ["2h", "8h"], underperform: ["20m", "90m"] }
+    "circ.vsat_*": { failed: ["15m", "45m"], underperform: ["10m", "40m"] }
+
 # Backfill parameters for THIS mode (run `make backfill` yourself — never automatic).
 backfill:
   enabled: false

@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from .settings import CATALOG_DIR
+from .catalog import parse_interval
 
 SIM_CONFIG_FILE = "sim_config.yml"
 
@@ -132,6 +133,29 @@ class Dropout:
 
 
 @dataclass
+class Hold:
+    """Minimum state-dwell (MTTR): once a stream ENTERS a band that has a window,
+    it must stay there for a randomized `uniform(lo, hi)` seconds before it can
+    re-roll — modelling real repair time, which the global SIM_STICKINESS scalar
+    can't express (it's symmetric across params and bands). Only applies to
+    streams that roll their own state; forced streams (segment-derived circuits)
+    ignore it. Keys are exact param keys or a trailing-`*` prefix (e.g.
+    `seg.fiber_*`). Off by default = no dwell, exactly the old behaviour."""
+    enabled: bool = False
+    exact: dict = field(default_factory=dict)      # key   -> {band: (lo, hi) seconds}
+    prefixes: list = field(default_factory=list)   # [(prefix, {band: (lo, hi)})]
+
+    def window_for(self, key: str, band: str):
+        m = self.exact.get(key)
+        if m is None:
+            for pfx, bm in self.prefixes:
+                if key.startswith(pfx):
+                    m = bm
+                    break
+        return m.get(band) if m else None
+
+
+@dataclass
 class Backfill:
     enabled: bool = False
     days: float = 14.0
@@ -145,12 +169,14 @@ class SimConfig:
     trend: Trend = field(default_factory=Trend)
     time_of_day: TimeOfDay = field(default_factory=TimeOfDay)
     dropout: Dropout = field(default_factory=Dropout)
+    hold: Hold = field(default_factory=Hold)
     backfill: Backfill = field(default_factory=Backfill)
 
     def enabled_features(self) -> list[str]:
         pairs = (("continuity", self.continuity), ("correlation", self.correlation),
                  ("trend", self.trend), ("time_of_day", self.time_of_day),
-                 ("dropout", self.dropout), ("backfill", self.backfill))
+                 ("dropout", self.dropout), ("hold", self.hold),
+                 ("backfill", self.backfill))
         return [name for name, f in pairs if f.enabled]
 
 
@@ -225,6 +251,38 @@ def _dropout(raw: dict) -> Dropout:
                    _num(raw, "probability", 0.0, "dropout", 0.0, 1.0), overrides)
 
 
+def _dur(v, where: str) -> float:
+    """A duration as seconds: a number, or an interval string like '2h'/'45m'."""
+    if isinstance(v, str):
+        return float(parse_interval(v))
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        if v <= 0:
+            raise ValueError(f"{where}: duration must be > 0, got {v!r}")
+        return float(v)
+    raise ValueError(f"{where}: duration must be a number or interval string, got {v!r}")
+
+
+def _window(v, where: str) -> tuple:
+    if not (isinstance(v, list) and len(v) == 2):
+        raise ValueError(f"{where}: dwell window must be [min, max], got {v!r}")
+    lo, hi = _dur(v[0], where), _dur(v[1], where)
+    if hi < lo:
+        raise ValueError(f"{where}: dwell window max {hi} < min {lo}")
+    return (lo, hi)
+
+
+def _hold(raw: dict) -> Hold:
+    exact, prefixes = {}, []
+    for key, bandmap in (raw.get("overrides") or {}).items():
+        bm = {band: _window(w, f"hold.overrides.{key}.{band}")
+              for band, w in (bandmap or {}).items()}
+        if key.endswith("*"):
+            prefixes.append((key[:-1], bm))
+        else:
+            exact[key] = bm
+    return Hold(bool(raw.get("enabled", False)), exact, prefixes)
+
+
 def _backfill(raw: dict) -> Backfill:
     return Backfill(bool(raw.get("enabled", False)),
                     _num(raw, "days", 14.0, "backfill", 0.001),
@@ -238,6 +296,7 @@ def _parse(raw: dict) -> SimConfig:
         trend=_trend(raw.get("trend") or {}),
         time_of_day=_tod(raw.get("time_of_day") or {}),
         dropout=_dropout(raw.get("dropout") or {}),
+        hold=_hold(raw.get("hold") or {}),
         backfill=_backfill(raw.get("backfill") or {}),
     )
 
@@ -291,3 +350,13 @@ def validate(cfg: SimConfig, param_bands: dict[str, set],
                      "a time-of-day multiplier has no effect on fixed enum values")
     for k in cfg.dropout.overrides:
         need_param(k, "dropout.overrides")
+    for key, bm in cfg.hold.exact.items():
+        for band in bm:
+            need_band(key, band, "hold.overrides")
+    for pfx, bm in cfg.hold.prefixes:
+        matched = [k for k in param_bands if k.startswith(pfx)]
+        if not matched:
+            raise ValueError(f"hold.overrides: prefix {pfx!r}* matches no parameter")
+        for band in bm:
+            if not any(band in param_bands[k] for k in matched):
+                raise ValueError(f"hold.overrides: no {pfx!r}* parameter has band {band!r}")

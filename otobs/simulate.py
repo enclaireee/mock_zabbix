@@ -116,6 +116,7 @@ class Stream:
     ramp_from: float = 0.0
     ramp_to: float | None = None
     ramp_start: float = 0.0
+    hold_until: float = 0.0  # MTTR dwell: can't leave the current band until this time
     send_key: str = ""  # trapper key actually sent; per-port streams append [<port>]
 
     def __post_init__(self):
@@ -187,12 +188,17 @@ def correlation_forces(cfg: SimConfig, by_host: dict) -> dict:
     return forced
 
 
+_BAND_RANK = {"good": 0, "underperform": 1, "failed": 2}
+
+
 def segment_forces(assets: list[AssetClass], by_host: dict) -> dict:
     """{(host, circuit_key): band} forcing each comm-link circuit to the WORST
-    current state of the physical segment(s) it rides — a hard, deterministic
-    force (unlike the probabilistic same-host `correlation` web). One fiber cut
-    thus drops every circuit on that span together; VSAT circuits (no depends_on)
-    are skipped and roll their own independent ping-loss machine.
+    current band of the physical segment(s) it rides — a hard, deterministic
+    force (unlike the probabilistic same-host `correlation` web). Worst by
+    severity rank good < underperform < failed, so a degrading (warning) span
+    shows its circuits as 'degraded' (impaired-but-up) and a cut shows them
+    'down' — and every circuit on a shared span moves together. VSAT circuits
+    (no depends_on) are skipped and roll their own independent ping-loss machine.
 
     Reads segments' CURRENT (pre-roll) state, exactly like correlation_forces, so
     it's causal and order-independent. Segments and circuits share the one NOC
@@ -208,10 +214,10 @@ def segment_forces(assets: list[AssetClass], by_host: dict) -> dict:
                 worst = "good"
                 for seg_key in c.param.depends_on:
                     seg = sd.get(seg_key)
-                    if seg and seg.state_idx is not None \
-                            and seg.param.sim.states[seg.state_idx].band != "good":
-                        worst = "failed"  # any down segment -> circuit down
-                        break
+                    if seg and seg.state_idx is not None:
+                        band = seg.param.sim.states[seg.state_idx].band
+                        if _BAND_RANK.get(band, 0) > _BAND_RANK[worst]:
+                            worst = band
                 forced[(host, c.param.key)] = worst
     return forced
 
@@ -224,9 +230,19 @@ def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
         return None
     fb = forced.get((s.host, s.param.key))
     forced_idx = _idx_of_band(s.param.sim, fb) if fb is not None else None
+    # MTTR dwell: a self-rolling stream can't leave its band until the window
+    # expires — real repair time. Forced streams (segment-derived circuits) are
+    # unaffected; they mirror their segment.
+    if (forced_idx is None and cfg.hold.enabled and s.state_idx is not None
+            and now < s.hold_until):
+        forced_idx = s.state_idx
     new_idx = next_state(s.param.sim, s.state_idx, settings.STICKINESS, forced_idx)
     transitioned = new_idx != s.state_idx
     s.state_idx = new_idx
+    if cfg.hold.enabled and transitioned:  # arm the dwell on entering a new band
+        win = cfg.hold.window_for(s.param.key, s.param.sim.states[new_idx].band)
+        if win:
+            s.hold_until = now + random.uniform(*win) / scale
     st = s.param.sim.states[new_idx]
     if (cfg.trend.enabled and s.param.sim.kind == "numeric"
             and transitioned and s.last_value is not None):

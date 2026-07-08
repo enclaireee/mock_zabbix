@@ -505,6 +505,50 @@ def test_comm_link_segment_derivation():
     assert v == 2, f"forced-down circuit emitted {v!r}, want 2 (down)"
     assert circ.param.sim.states[circ.state_idx].band == "failed"
 
+    # A WARNING-level (underperform) segment forces its circuits to 'degraded'
+    # (impaired-but-up), not down — the gradual-degradation path.
+    cut.state_idx = _idx_of_band(cut.param.sim, "underperform")
+    forced = segment_forces([comm], by_host)
+    assert forced[(host, "circ.grissik_pgd")] == "underperform"
+    assert forced[(host, "circ.grissik_pgd_pabx")] == "underperform"
+    circ2 = sd["circ.grissik_pgd_pabx"]
+    v2 = process_stream(circ2, now=0.0, scale=1.0, cfg=SimConfig(), forced=forced, hour=0.0)
+    assert v2 == 3, f"degraded circuit emitted {v2!r}, want 3 (degraded)"
+
+
+def test_hold_dwell_keeps_state_until_expiry():
+    """MTTR dwell: once a stream enters a band with a hold window it stays there
+    until the window expires, even with stickiness re-rolling and the force gone."""
+    from otobs.simulate import Stream, process_stream
+    from otobs.sim_config import SimConfig, Hold
+    cfg = SimConfig(hold=Hold(enabled=True, exact={"k": {"failed": (100.0, 100.0)}}))
+    s = Stream("h", param("k"))
+    random.seed(0)
+    # Force into failed -> arms a fixed 100s dwell (uniform(100,100)) at now=0.
+    process_stream(s, 0.0, 1.0, cfg, {("h", "k"): "failed"}, 0.0)
+    assert s.param.sim.states[s.state_idx].band == "failed"
+    assert s.hold_until == 100.0
+    # Inside the window it cannot leave failed, even unforced.
+    for t in (10.0, 50.0, 99.0):
+        process_stream(s, t, 1.0, cfg, {}, 0.0)
+        assert s.param.sim.states[s.state_idx].band == "failed", f"left failed at t={t}"
+    # After the window it's free to re-roll and does eventually leave.
+    left = any(process_stream(s, float(t), 1.0, cfg, {}, 0.0) is not None
+               and s.param.sim.states[s.state_idx].band != "failed"
+               for t in range(101, 600))
+    assert left, "never left failed after the dwell expired"
+
+
+def test_hold_disabled_arms_nothing():
+    """hold off => hold_until never set, no dwell — the strict no-op guarantee."""
+    from otobs.simulate import Stream, process_stream
+    from otobs.sim_config import SimConfig
+    s = Stream("h", param("k"))
+    random.seed(0)
+    for t in range(50):
+        process_stream(s, float(t), 1.0, SimConfig(), {("h", "k"): "failed"}, 0.0)
+    assert s.hold_until == 0.0
+
 
 def test_comm_link_trigger_tags_scoped_to_down():
     """Only the high/disaster 'down' trigger of a circuit carries the link tag the

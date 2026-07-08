@@ -64,7 +64,7 @@ topic; WALKTHROUGH.md is the deep version that synthesizes across them.
 
 ```
 catalog/            asset-class definitions (the source of truth) + schema docs
-  └─ sim_config.yml active realism config (continuity/correlation/trend/time-of-day/dropout/backfill)
+  └─ sim_config.yml active realism config (continuity/correlation/trend/time-of-day/dropout/hold/backfill)
 presets/            ready-made sim modes copied in by `make config` (baseline/steady/realistic/diurnal/stress/maintenance/demo/ml)
 otobs/              python package
   ├─ catalog.py     load + validate catalog/*.yml into typed objects (incl. segments/circuits)

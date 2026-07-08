@@ -7,7 +7,7 @@ source of truth consumed by `otobs.provision` (Zabbix config) and
 > Two files here are **not** asset classes and are loaded separately:
 > `sites.yml` (the station registry, below) and `sim_config.yml` (the active
 > simulation realism layer — continuity, correlation, trend, time-of-day, dropout,
-> backfill — swapped by `make config MODE=…`; see
+> hold, backfill — swapped by `make config MODE=…`; see
 > [docs/sim-config.md](../docs/sim-config.md)). `sim_config.yml` is orthogonal to
 > the per-parameter `sim:` block described below and does not replace it.
 
