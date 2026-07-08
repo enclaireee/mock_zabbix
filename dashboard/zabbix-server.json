@@ -1,0 +1,42 @@
+{
+  "auto_start": "1",
+  "dashboardid": "57",
+  "display_period": "30",
+  "name": "Zabbix server",
+  "pages": [
+    {
+      "dashboard_pageid": "57",
+      "display_period": "0",
+      "name": "",
+      "widgets": [
+        {
+          "fields": [
+            {
+              "name": "sysmapid.0",
+              "type": "8",
+              "value": "1"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "FBPGZ"
+            }
+          ],
+          "height": "4",
+          "name": "",
+          "type": "map",
+          "view_mode": "0",
+          "widgetid": "400",
+          "width": "72",
+          "x": "0",
+          "y": "0"
+        }
+      ]
+    }
+  ],
+  "private": "1",
+  "userGroups": [],
+  "userid": "1",
+  "users": [],
+  "uuid": ""
+}

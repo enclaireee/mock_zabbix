@@ -42,4 +42,10 @@ list: venv ## Print the parsed catalog (sanity view)
 check: venv ## Run the self-check (catalog + generator), no Zabbix needed
 	$(PY) -m otobs check
 
-.PHONY: help venv up down clean logs provision simulate backfill config list check
+export-dashboards: venv ## Export live Zabbix dashboards to dashboard/*.json
+	$(PY) -m otobs export-dashboards
+
+import-dashboards: venv ## Recreate dashboard/*.json into Zabbix (run after make provision)
+	$(PY) -m otobs import-dashboards
+
+.PHONY: help venv up down clean logs provision simulate backfill config list check export-dashboards import-dashboards

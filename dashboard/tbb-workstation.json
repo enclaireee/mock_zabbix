@@ -1,0 +1,428 @@
+{
+  "auto_start": "1",
+  "dashboardid": "402",
+  "display_period": "30",
+  "name": "TBB - Workstation / HMI Dashboards",
+  "pages": [
+    {
+      "dashboard_pageid": "25675",
+      "display_period": "0",
+      "name": "",
+      "widgets": [
+        {
+          "fields": [
+            {
+              "name": "clock_type",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show.0",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show.1",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "date_bold",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "date_color",
+              "type": "1",
+              "value": "000000"
+            },
+            {
+              "name": "time_bold",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "time_color",
+              "type": "1",
+              "value": "000000"
+            },
+            {
+              "name": "time_sec",
+              "type": "0",
+              "value": "0"
+            }
+          ],
+          "height": "2",
+          "name": "Real Time",
+          "type": "clock",
+          "view_mode": "0",
+          "widgetid": "100184",
+          "width": "16",
+          "x": "56",
+          "y": "0"
+        },
+        {
+          "fields": [
+            {
+              "name": "itemid.0",
+              "type": "4",
+              "value": "50885"
+            },
+            {
+              "name": "min",
+              "type": "1",
+              "value": "0"
+            },
+            {
+              "name": "max",
+              "type": "1",
+              "value": "100"
+            },
+            {
+              "name": "thresholds.0.color",
+              "type": "1",
+              "value": "4CAF50"
+            },
+            {
+              "name": "thresholds.0.threshold",
+              "type": "1",
+              "value": "0"
+            },
+            {
+              "name": "thresholds.1.color",
+              "type": "1",
+              "value": "FFEB3B"
+            },
+            {
+              "name": "thresholds.1.threshold",
+              "type": "1",
+              "value": "75"
+            },
+            {
+              "name": "thresholds.2.color",
+              "type": "1",
+              "value": "FF465C"
+            },
+            {
+              "name": "thresholds.2.threshold",
+              "type": "1",
+              "value": "98"
+            }
+          ],
+          "height": "3",
+          "name": "Memory Load",
+          "type": "gauge",
+          "view_mode": "0",
+          "widgetid": "100185",
+          "width": "25",
+          "x": "0",
+          "y": "2"
+        },
+        {
+          "fields": [
+            {
+              "name": "itemid.0",
+              "type": "4",
+              "value": "50888"
+            },
+            {
+              "name": "min",
+              "type": "1",
+              "value": "0"
+            },
+            {
+              "name": "max",
+              "type": "1",
+              "value": "100"
+            },
+            {
+              "name": "thresholds.0.color",
+              "type": "1",
+              "value": "FF465C"
+            },
+            {
+              "name": "thresholds.0.threshold",
+              "type": "1",
+              "value": "0"
+            },
+            {
+              "name": "thresholds.1.color",
+              "type": "1",
+              "value": "FFEB3B"
+            },
+            {
+              "name": "thresholds.1.threshold",
+              "type": "1",
+              "value": "5"
+            },
+            {
+              "name": "thresholds.2.color",
+              "type": "1",
+              "value": "66BB6A"
+            },
+            {
+              "name": "thresholds.2.threshold",
+              "type": "1",
+              "value": "20"
+            }
+          ],
+          "height": "3",
+          "name": "Memory Available",
+          "type": "gauge",
+          "view_mode": "0",
+          "widgetid": "100186",
+          "width": "23",
+          "x": "25",
+          "y": "2"
+        },
+        {
+          "fields": [
+            {
+              "name": "itemid.0",
+              "type": "4",
+              "value": "50886"
+            },
+            {
+              "name": "min",
+              "type": "1",
+              "value": "0"
+            },
+            {
+              "name": "max",
+              "type": "1",
+              "value": "100"
+            },
+            {
+              "name": "thresholds.0.color",
+              "type": "1",
+              "value": "4CAF50"
+            },
+            {
+              "name": "thresholds.0.threshold",
+              "type": "1",
+              "value": "0"
+            },
+            {
+              "name": "thresholds.1.color",
+              "type": "1",
+              "value": "FFEB3B"
+            },
+            {
+              "name": "thresholds.1.threshold",
+              "type": "1",
+              "value": "75"
+            },
+            {
+              "name": "thresholds.2.color",
+              "type": "1",
+              "value": "FF465C"
+            },
+            {
+              "name": "thresholds.2.threshold",
+              "type": "1",
+              "value": "98"
+            }
+          ],
+          "height": "3",
+          "name": "Free Disk Space",
+          "type": "gauge",
+          "view_mode": "0",
+          "widgetid": "100187",
+          "width": "24",
+          "x": "48",
+          "y": "2"
+        },
+        {
+          "fields": [
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "26"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10697"
+            },
+            {
+              "name": "show_type",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "PQULZ"
+            }
+          ],
+          "height": "2",
+          "name": "Problems by Severity - TBB Workstations",
+          "type": "problemsbysv",
+          "view_mode": "0",
+          "widgetid": "100188",
+          "width": "56",
+          "x": "0",
+          "y": "0"
+        },
+        {
+          "fields": [
+            {
+              "name": "ds.0.hosts.0",
+              "type": "1",
+              "value": "Terbanggi Besar \u2014 Wonderware HMI Operator Station 01"
+            },
+            {
+              "name": "ds.0.items.0",
+              "type": "1",
+              "value": "CPU Utilization"
+            },
+            {
+              "name": "ds.0.color",
+              "type": "1",
+              "value": "4DB6AC"
+            },
+            {
+              "name": "righty",
+              "type": "0",
+              "value": "0"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "KOYLN"
+            }
+          ],
+          "height": "4",
+          "name": "Workstation - CPU Utilization% Graph",
+          "type": "svggraph",
+          "view_mode": "0",
+          "widgetid": "100189",
+          "width": "25",
+          "x": "0",
+          "y": "5"
+        },
+        {
+          "fields": [
+            {
+              "name": "ds.0.hosts.0",
+              "type": "1",
+              "value": "Terbanggi Besar \u2014 Wonderware HMI Operator Station 01"
+            },
+            {
+              "name": "ds.0.items.0",
+              "type": "1",
+              "value": "Memory Available"
+            },
+            {
+              "name": "ds.0.color",
+              "type": "1",
+              "value": "4DB6AC"
+            },
+            {
+              "name": "righty",
+              "type": "0",
+              "value": "0"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "NFCXY"
+            }
+          ],
+          "height": "4",
+          "name": "Workstation - Memory Avaliable Graph",
+          "type": "svggraph",
+          "view_mode": "0",
+          "widgetid": "100190",
+          "width": "23",
+          "x": "25",
+          "y": "5"
+        },
+        {
+          "fields": [
+            {
+              "name": "ds.0.hosts.0",
+              "type": "1",
+              "value": "Terbanggi Besar \u2014 Wonderware HMI Operator Station 01"
+            },
+            {
+              "name": "ds.0.items.0",
+              "type": "1",
+              "value": "Free Logical Disk Space (C:)"
+            },
+            {
+              "name": "ds.0.color",
+              "type": "1",
+              "value": "4DB6AC"
+            },
+            {
+              "name": "righty",
+              "type": "0",
+              "value": "0"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "KGYTJ"
+            }
+          ],
+          "height": "4",
+          "name": "Workstation - Free Disk Space (C:) Graph",
+          "type": "svggraph",
+          "view_mode": "0",
+          "widgetid": "100191",
+          "width": "24",
+          "x": "48",
+          "y": "5"
+        },
+        {
+          "fields": [
+            {
+              "name": "rf_rate",
+              "type": "0",
+              "value": "10"
+            },
+            {
+              "name": "show",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "26"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10697"
+            },
+            {
+              "name": "show_opdata",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "TDKWF"
+            }
+          ],
+          "height": "5",
+          "name": "Problems History",
+          "type": "problems",
+          "view_mode": "0",
+          "widgetid": "100226",
+          "width": "72",
+          "x": "0",
+          "y": "9"
+        }
+      ]
+    }
+  ],
+  "private": "1",
+  "userGroups": [],
+  "userid": "1",
+  "users": [],
+  "uuid": ""
+}

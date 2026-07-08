@@ -41,6 +41,7 @@ behavior on top. **Every feature defaults off**; with the file absent or all
 | `trend` | **value sampling** | On a state transition, ramp from the last emitted value toward a fresh target inside the new band over `ramp_seconds` (÷ `SIM_TIME_SCALE`), with jitter — no band clamp during the ramp. |
 | `time_of_day` | **value sampling** | Multiply the sampled value by a peak/off-peak factor by (fractional) local hour before jitter, blending linearly over `shoulder_hours` at each window edge. |
 | `dropout` | **emission** | Skip a due send entirely (state frozen, `next_due` still advances) so a real gap forms. |
+| `hold` | **state selection** | On entering a band with a configured window, a self-rolling stream must dwell there for a randomized `uniform(min, max)` before it may re-roll (MTTR). |
 | `backfill` | **timing** | Run the same machine over a past window, stamping each value with its historical `clock`. |
 
 To support continuity and trends, a `Stream` also carries `last_value` and the

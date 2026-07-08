@@ -554,7 +554,7 @@ no-op re-run, field edits, param deletion, restoration.
 ## 5. Simulation, in depth
 
 The simulator has two layers: the **baseline state machine** (always on) and
-the **realism layer** (`sim_config.yml`, six features, each off by default).
+the **realism layer** (`sim_config.yml`, seven features, each off by default).
 The load-bearing invariant between them:
 
 > With `sim_config.yml` absent, or every feature `enabled: false`, the output
@@ -642,7 +642,7 @@ the *value* (with the fixed precedence above), **dropout** only influences
 the same thing, so there is no "who wins" ambiguity beyond the documented
 ramp > walk > plain ordering.
 
-### 5.3 The six realism features and the real behavior each models
+### 5.3 The seven realism features and the real behavior each models
 
 Configured in `catalog/sim_config.yml`; full annotated schema in
 [docs/sim-config.md](docs/sim-config.md). What matters here is *why each
@@ -715,7 +715,18 @@ never black-hole the fire-and-gas panel. Honest caveat: these gaps are the
 defines only `last()` threshold triggers — gap alerting needs a hand-added
 `nodata()` trigger until the schema grows windowed functions (§10.7).
 
-**6. `backfill` (`days`, `speed_multiplier`)** — graphs are useless without
+**6. `hold` (per-param/prefix `[min, max]` windows per band)** — `SIM_STICKINESS`
+is one symmetric scalar, so it can't say "a fiber cut stays down for hours but a
+satellite rain-fade clears in minutes." On entering a band with a configured
+window, a stream must dwell there for a randomized `uniform(min, max)` before it
+may re-roll — real MTTR. Only **self-rolling** streams honour a dwell; a stream
+forced this tick by `correlation` or by the comm-link segment dependency ignores
+its own hold and follows the force, so a shared fiber cut keeps every circuit on
+that span down for the *segment's* window, not a per-circuit one. Windows scale
+with `SIM_TIME_SCALE` like intervals. Full detail:
+[comm-links-sla.md](docs/comm-links-sla.md#repair-time-mttr-outages-last-realistically-long).
+
+**7. `backfill` (`days`, `speed_multiplier`)** — graphs are useless without
 history, and ML needs weeks of it. `run_backfill` sweeps the same state
 machine over `[now − days, now]` as a discrete-event simulation: streams are
 bucketed by interval (all `5s` streams share one due-clock — checking one
@@ -1054,12 +1065,12 @@ minimal mechanism that yields *emergent*, endlessly-varied, statistically
 steerable degradation stories from three numbers per parameter — and the
 realism layer then adds the physics the chain alone can't express.
 
-### 10.5 The realism layer as six orthogonal no-op-by-default features
+### 10.5 The realism layer as seven orthogonal no-op-by-default features
 
 The alternative was a "version 2 simulator". Rejected because: (a) each
 feature maps to one named deficiency of the baseline (teleporting values,
-independence, step transitions, clock-blindness, gapless data, forward-only
-history) and can be reasoned about — and tested — alone; (b) the
+independence, step transitions, clock-blindness, gapless data, one-size MTTR,
+forward-only history) and can be reasoned about — and tested — alone; (b) the
 byte-identical-when-disabled invariant means the baseline remains the
 reference implementation forever, so every feature is *provably* additive;
 (c) presets compose the features into intents (demo vs. ml vs. stress)

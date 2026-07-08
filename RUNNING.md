@@ -93,7 +93,7 @@ realism knobs live in a separate file — see below.
 
 ### Realism layer & modes — `catalog/sim_config.yml`
 
-An optional layer on top of the per-parameter bands. Six features, **each with
+An optional layer on top of the per-parameter bands. Seven features, **each with
 its own `enabled` flag and off by default** — with the file absent or everything
 `false`, the simulator behaves exactly as the plain state machine does.
 
@@ -128,6 +128,7 @@ manual `make backfill` step. Full mode + feature reference: **[docs/sim-config.m
 | `trend` | Ramp gradually from the last value into the new band over `ramp_seconds` instead of stepping — realistic wear curves |
 | `time_of_day` | Scale a value by a peak/off-peak multiplier by local hour (shift-hour load) |
 | `dropout` | Occasionally skip a due send, leaving a genuine gap — the condition a Zabbix `nodata()` trigger alerts on (none shipped in the catalog yet; see WALKTHROUGH) |
+| `hold` | Minimum dwell time in a band (MTTR) — a fiber cut stays down for hours, a satellite rain-fade clears in minutes, instead of both following the same global `SIM_STICKINESS` |
 | `backfill` | `make backfill` generates days/weeks of backdated history with correct timestamps in one run |
 
 `make check` validates the active file against the catalog (unknown param key, bad

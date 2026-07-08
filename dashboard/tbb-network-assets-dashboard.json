@@ -1,0 +1,522 @@
+{
+  "auto_start": "1",
+  "dashboardid": "405",
+  "display_period": "30",
+  "name": "TBB - Network Assets Dashboard",
+  "pages": [
+    {
+      "dashboard_pageid": "25678",
+      "display_period": "0",
+      "name": "",
+      "widgets": [
+        {
+          "fields": [
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "25"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10693"
+            },
+            {
+              "name": "show_type",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "YHGJP"
+            }
+          ],
+          "height": "2",
+          "name": "Problems by Severity - TBB Workstations",
+          "type": "problemsbysv",
+          "view_mode": "0",
+          "widgetid": "100230",
+          "width": "56",
+          "x": "0",
+          "y": "0"
+        },
+        {
+          "fields": [
+            {
+              "name": "clock_type",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show.0",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show.1",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "date_bold",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "date_color",
+              "type": "1",
+              "value": "000000"
+            },
+            {
+              "name": "time_bold",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "time_color",
+              "type": "1",
+              "value": "000000"
+            },
+            {
+              "name": "time_sec",
+              "type": "0",
+              "value": "0"
+            }
+          ],
+          "height": "2",
+          "name": "Real Time",
+          "type": "clock",
+          "view_mode": "0",
+          "widgetid": "100231",
+          "width": "16",
+          "x": "56",
+          "y": "0"
+        },
+        {
+          "fields": [
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "25"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10693"
+            },
+            {
+              "name": "items.0",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/1"
+            },
+            {
+              "name": "items.1",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/2"
+            },
+            {
+              "name": "items.2",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/3"
+            },
+            {
+              "name": "items.3",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/4"
+            },
+            {
+              "name": "items.4",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/5"
+            },
+            {
+              "name": "items.5",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/6"
+            },
+            {
+              "name": "items.6",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/7"
+            },
+            {
+              "name": "items.7",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/8"
+            },
+            {
+              "name": "items.8",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/9"
+            },
+            {
+              "name": "items.9",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/10"
+            },
+            {
+              "name": "items.10",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/11"
+            },
+            {
+              "name": "items.11",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/12"
+            },
+            {
+              "name": "items.12",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/13"
+            },
+            {
+              "name": "items.13",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/14"
+            },
+            {
+              "name": "items.14",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/15"
+            },
+            {
+              "name": "items.15",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/16"
+            },
+            {
+              "name": "items.16",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/17"
+            },
+            {
+              "name": "items.17",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/18"
+            },
+            {
+              "name": "items.18",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/19"
+            },
+            {
+              "name": "items.19",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/20"
+            },
+            {
+              "name": "items.20",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/21"
+            },
+            {
+              "name": "items.21",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/22"
+            },
+            {
+              "name": "items.22",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/23"
+            },
+            {
+              "name": "items.23",
+              "type": "1",
+              "value": "Interface Operational Status Gi1/0/24"
+            },
+            {
+              "name": "thresholds.0.color",
+              "type": "1",
+              "value": "43A047"
+            },
+            {
+              "name": "thresholds.0.threshold",
+              "type": "1",
+              "value": "1"
+            },
+            {
+              "name": "thresholds.1.color",
+              "type": "1",
+              "value": "FF465C"
+            },
+            {
+              "name": "thresholds.1.threshold",
+              "type": "1",
+              "value": "2"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "WHBFJ"
+            }
+          ],
+          "height": "5",
+          "name": "Interface Operational Status",
+          "type": "honeycomb",
+          "view_mode": "0",
+          "widgetid": "100232",
+          "width": "26",
+          "x": "0",
+          "y": "2"
+        },
+        {
+          "fields": [
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "25"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10693"
+            },
+            {
+              "name": "items.0",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/1"
+            },
+            {
+              "name": "items.1",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/2"
+            },
+            {
+              "name": "items.2",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/3"
+            },
+            {
+              "name": "items.3",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/4"
+            },
+            {
+              "name": "items.4",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/5"
+            },
+            {
+              "name": "items.5",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/6"
+            },
+            {
+              "name": "items.6",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/7"
+            },
+            {
+              "name": "items.7",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/8"
+            },
+            {
+              "name": "items.8",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/9"
+            },
+            {
+              "name": "items.9",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/10"
+            },
+            {
+              "name": "items.10",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/11"
+            },
+            {
+              "name": "items.11",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/12"
+            },
+            {
+              "name": "items.12",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/13"
+            },
+            {
+              "name": "items.13",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/14"
+            },
+            {
+              "name": "items.14",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/15"
+            },
+            {
+              "name": "items.15",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/16"
+            },
+            {
+              "name": "items.16",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/17"
+            },
+            {
+              "name": "items.17",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/18"
+            },
+            {
+              "name": "items.18",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/19"
+            },
+            {
+              "name": "items.19",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/20"
+            },
+            {
+              "name": "items.20",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/21"
+            },
+            {
+              "name": "items.21",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/22"
+            },
+            {
+              "name": "items.22",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/23"
+            },
+            {
+              "name": "items.23",
+              "type": "1",
+              "value": "Interface Administrative Status Gi1/0/24"
+            },
+            {
+              "name": "thresholds.0.color",
+              "type": "1",
+              "value": "43A047"
+            },
+            {
+              "name": "thresholds.0.threshold",
+              "type": "1",
+              "value": "1"
+            },
+            {
+              "name": "thresholds.1.color",
+              "type": "1",
+              "value": "FF465C"
+            },
+            {
+              "name": "thresholds.1.threshold",
+              "type": "1",
+              "value": "2"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "DGUGZ"
+            }
+          ],
+          "height": "5",
+          "name": "Interface Administrative Status",
+          "type": "honeycomb",
+          "view_mode": "0",
+          "widgetid": "100233",
+          "width": "25",
+          "x": "26",
+          "y": "2"
+        },
+        {
+          "fields": [
+            {
+              "name": "itemid.0",
+              "type": "4",
+              "value": "50906"
+            },
+            {
+              "name": "thresholds.0.color",
+              "type": "1",
+              "value": "00FF00"
+            },
+            {
+              "name": "thresholds.0.threshold",
+              "type": "1",
+              "value": "1"
+            },
+            {
+              "name": "thresholds.1.color",
+              "type": "1",
+              "value": "FFFF00"
+            },
+            {
+              "name": "thresholds.1.threshold",
+              "type": "1",
+              "value": "2"
+            },
+            {
+              "name": "thresholds.2.color",
+              "type": "1",
+              "value": "FF465C"
+            },
+            {
+              "name": "thresholds.2.threshold",
+              "type": "1",
+              "value": "3"
+            }
+          ],
+          "height": "2",
+          "name": "TBB Equipment Fan State",
+          "type": "item",
+          "view_mode": "0",
+          "widgetid": "100234",
+          "width": "21",
+          "x": "51",
+          "y": "2"
+        },
+        {
+          "fields": [
+            {
+              "name": "show",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "25"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10693"
+            },
+            {
+              "name": "show_opdata",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "LQCHC"
+            }
+          ],
+          "height": "5",
+          "name": "",
+          "type": "problems",
+          "view_mode": "0",
+          "widgetid": "100235",
+          "width": "72",
+          "x": "0",
+          "y": "7"
+        }
+      ]
+    }
+  ],
+  "private": "1",
+  "userGroups": [],
+  "userid": "1",
+  "users": [],
+  "uuid": ""
+}

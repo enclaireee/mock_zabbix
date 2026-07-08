@@ -93,7 +93,7 @@ default** (file absent or all `enabled: false` ⇒ identical to the plain machin
 
 Pick a config with `make config MODE=<name>` (or `FILE=…`); the workflow is
 config → (optional) backfill → simulate, and backfill replays the active mode. The
-eight modes and six features are documented in [sim-config.md](sim-config.md).
+eight modes and seven features are documented in [sim-config.md](sim-config.md).
 
 | Feature | Effect on the data plane |
 |---|---|
@@ -102,6 +102,7 @@ eight modes and six features are documented in [sim-config.md](sim-config.md).
 | `trend` | On a state change, ramps from the last value toward a target inside the new band over `ramp_seconds` (respecting `SIM_TIME_SCALE`) — a curve, not a step. |
 | `time_of_day` | Scales a value by a peak/off-peak multiplier by local hour (`settings.TIMEZONE`) — operational cycles. |
 | `dropout` | Skips a due send with some probability, leaving a genuine gap — the raw material for `nodata()` alerting. |
+| `hold` | Forces a minimum dwell time in a band on entry (MTTR) — different windows per parameter/band, unlike the single symmetric `SIM_STICKINESS` scalar. |
 | `backfill` | `otobs.backfill` mode sweeps the state machine from `now − days` to `now` and pushes each value with its historical `clock`, so graphs have depth immediately. |
 
 This is a **data-plane** change only: the config plane (items, triggers,

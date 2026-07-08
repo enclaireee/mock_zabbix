@@ -155,8 +155,13 @@ def main() -> None:
         cmd_list()
     elif arg == "check":
         cmd_check()
+    elif arg == "export-dashboards":
+        from .dashboard import export_main as m; m()
+    elif arg == "import-dashboards":
+        from .dashboard import import_main as m; m()
     else:
-        print("usage: python -m otobs {provision|simulate|backfill|config|list|check}")
+        print("usage: python -m otobs {provision|simulate|backfill|config|list|check|"
+              "export-dashboards|import-dashboards}")
         sys.exit(2)
 
 

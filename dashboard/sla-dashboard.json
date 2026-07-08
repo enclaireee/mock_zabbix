@@ -1,0 +1,228 @@
+{
+  "auto_start": "1",
+  "dashboardid": "410",
+  "display_period": "30",
+  "name": "SLA Dashboard",
+  "pages": [
+    {
+      "dashboard_pageid": "25683",
+      "display_period": "0",
+      "name": "",
+      "widgets": [
+        {
+          "fields": [
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "27"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10701"
+            },
+            {
+              "name": "items.0",
+              "type": "1",
+              "value": "PGN_Segment1 \u2014 Metro-E fiber, PGN_Station1\u2013PGN_Station2 (Telkom)"
+            },
+            {
+              "name": "items.1",
+              "type": "1",
+              "value": "PGN_Segment2 \u2014 Metro-E fiber, PGN_Station2\u2013PGN_Station3 (Icon+)"
+            },
+            {
+              "name": "items.2",
+              "type": "1",
+              "value": "PGN_Segment3 \u2014 Metro-E fiber, PGN_Station3\u2013PGN_Station4 (Moratelindo)"
+            },
+            {
+              "name": "items.3",
+              "type": "1",
+              "value": "PGN_Segment4 \u2014 MPLS CE port, PGN_Station2\u2013PGN_Station5 (Telkom)"
+            },
+            {
+              "name": "items.4",
+              "type": "1",
+              "value": "PGN_Segment5 \u2014 MPLS CE port, PGN_Station5\u2013PGN_Station6 (Lintasarta)"
+            },
+            {
+              "name": "items.5",
+              "type": "1",
+              "value": "PGN_Segment6 \u2014 MPLS CE port, PGN_Station2\u2013PGN_Station6 (Telkomsat)"
+            },
+            {
+              "name": "items.6",
+              "type": "1",
+              "value": "PGN_Segment7 \u2014 SDH/SONET ring path, PGN_Station3\u2013PGN_Station6 (PGN-owned)"
+            },
+            {
+              "name": "items.7",
+              "type": "1",
+              "value": "PGN_Segment8 \u2014 SDH/SONET ring path, PGN_Station6\u2013PGN_Station4 (PGN-owned)"
+            },
+            {
+              "name": "items.8",
+              "type": "1",
+              "value": "PGN_Segment9 \u2014 SDH/SONET ring path, PGN_Station4\u2013PGN_Station3 (PGN-owned)"
+            },
+            {
+              "name": "items.9",
+              "type": "1",
+              "value": "PGN_Segment10 \u2014 Microwave PTP, PGN_Station4\u2013PGN_Station7 (PGN-owned, Protelindo tower)"
+            },
+            {
+              "name": "items.10",
+              "type": "1",
+              "value": "PGN_Segment11 \u2014 Microwave PTP, PGN_Station7\u2013PGN_Station8 (Telkomsat radio-over-IP)"
+            },
+            {
+              "name": "thresholds.0.color",
+              "type": "1",
+              "value": "E53935"
+            },
+            {
+              "name": "thresholds.0.threshold",
+              "type": "1",
+              "value": "-30"
+            },
+            {
+              "name": "thresholds.1.color",
+              "type": "1",
+              "value": "FFD54F"
+            },
+            {
+              "name": "thresholds.1.threshold",
+              "type": "1",
+              "value": "-10"
+            },
+            {
+              "name": "thresholds.2.color",
+              "type": "1",
+              "value": "0EC9AC"
+            },
+            {
+              "name": "thresholds.2.threshold",
+              "type": "1",
+              "value": "-5"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "BPQCI"
+            }
+          ],
+          "height": "3",
+          "name": "Tesy",
+          "type": "honeycomb",
+          "view_mode": "0",
+          "widgetid": "100251",
+          "width": "72",
+          "x": "0",
+          "y": "10"
+        },
+        {
+          "fields": [
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "27"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10701"
+            },
+            {
+              "name": "show_type",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show_opdata",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "YADFJ"
+            }
+          ],
+          "height": "2",
+          "name": "",
+          "type": "problemsbysv",
+          "view_mode": "0",
+          "widgetid": "100248",
+          "width": "57",
+          "x": "0",
+          "y": "0"
+        },
+        {
+          "fields": [
+            {
+              "name": "clock_type",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show.0",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show.1",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "date_color",
+              "type": "1",
+              "value": "26C6DA"
+            },
+            {
+              "name": "time_color",
+              "type": "1",
+              "value": "26C6DA"
+            },
+            {
+              "name": "time_sec",
+              "type": "0",
+              "value": "0"
+            }
+          ],
+          "height": "2",
+          "name": "Local Time",
+          "type": "clock",
+          "view_mode": "0",
+          "widgetid": "100249",
+          "width": "15",
+          "x": "57",
+          "y": "0"
+        },
+        {
+          "fields": [
+            {
+              "name": "slaid.0",
+              "type": "10",
+              "value": "2"
+            }
+          ],
+          "height": "8",
+          "name": "",
+          "type": "slareport",
+          "view_mode": "0",
+          "widgetid": "100250",
+          "width": "72",
+          "x": "0",
+          "y": "2"
+        }
+      ]
+    }
+  ],
+  "private": "1",
+  "userGroups": [],
+  "userid": "1",
+  "users": [],
+  "uuid": ""
+}

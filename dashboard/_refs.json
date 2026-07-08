@@ -1,0 +1,13 @@
+{
+  "group": {},
+  "host": {
+    "10084": "Zabbix server"
+  },
+  "item": {
+    "23277": {
+      "host": "Zabbix server",
+      "key": "zabbix[wcache,values]"
+    }
+  },
+  "sla": {}
+}

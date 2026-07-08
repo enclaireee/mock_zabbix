@@ -52,7 +52,7 @@ topic; WALKTHROUGH.md is the deep version that synthesizes across them.
 | **[docs/architecture.md](docs/architecture.md)** | How do the pieces fit together, and how does the mock map to real OT collectors? |
 | **[catalog/README.md](catalog/README.md)** | What's the YAML schema for `catalog/*.yml`? |
 | **[docs/sim-states.md](docs/sim-states.md)** | How does the simulator state machine work (states, bands, sticky transitions)? |
-| **[docs/sim-config.md](docs/sim-config.md)** | The sim **modes** (`make config`) and the six `sim_config.yml` realism features, in full. |
+| **[docs/sim-config.md](docs/sim-config.md)** | The sim **modes** (`make config`) and the seven `sim_config.yml` realism features, in full. |
 | **[docs/band-weights.md](docs/band-weights.md)** | What do the `good`/`underperform`/`failed` weight tokens mean? |
 | **[docs/env-loading.md](docs/env-loading.md)** | How does `.env` get parsed into settings? |
 | **[docs/geomap.md](docs/geomap.md)** | How does the Zabbix Geomap widget get wired up? |
