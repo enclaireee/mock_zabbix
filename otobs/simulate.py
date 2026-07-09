@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -25,7 +26,7 @@ from .sim_config import SimConfig, load_sim_config
 try:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     _TZ = ZoneInfo(settings.TIMEZONE)
-except ZoneInfoNotFoundError:
+except (ZoneInfoNotFoundError, ValueError):
     _TZ = None
 
 log = logging.getLogger(__name__)
@@ -282,8 +283,13 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
             sender.send([ItemValue(h, k, v) for h, k, v in lld])
             log.info("Sent %d LLD discovery payload(s) — per-port items appear once the "
                      "server processes the trap (a few seconds).", len(lld))
-        except (ProcessingError, OSError) as e:
+        except (ProcessingError, OSError, json.JSONDecodeError) as e:
             log.error("discovery send error: %s", e)
+
+    # Bounds in-flight sends to SIM_SENDER_WORKERS: a saturated pool drops this
+    # tick's batch (logged) instead of queuing unboundedly when Zabbix is slow,
+    # which also keeps Ctrl+C's executor shutdown from waiting on a backlog.
+    send_slots = threading.Semaphore(settings.SIM_SENDER_WORKERS)
 
     def send_batch(batch: list, notes: list[str]) -> None:
         """Runs on a worker thread: the trapper round-trip is the slow part of a
@@ -294,8 +300,10 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
             fail = getattr(resp, "failed", "?")
             tail = ("  | " + ", ".join(notes[:4]) + ("…" if len(notes) > 4 else "")) if notes else ""
             log.info("sent=%d processed=%s failed=%s%s", len(batch), ok, fail, tail)
-        except (ProcessingError, OSError) as e:
+        except (ProcessingError, OSError, json.JSONDecodeError) as e:
             log.error("send error: %s", e)
+        finally:
+            send_slots.release()
 
     with ThreadPoolExecutor(max_workers=settings.SIM_SENDER_WORKERS) as executor:
         while True:
@@ -319,7 +327,11 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
                     notes.append(n)
 
             if batch:
-                executor.submit(send_batch, batch, notes)
+                if send_slots.acquire(blocking=False):
+                    executor.submit(send_batch, batch, notes)
+                else:
+                    log.warning("sender queue full (%d in flight) — dropping this tick's "
+                               "%d readings", settings.SIM_SENDER_WORKERS, len(batch))
             time.sleep(settings.SIM_POLL_INTERVAL)
 
 
@@ -378,7 +390,7 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     if lld:
         try:  # seed discovery at the window start so per-port items exist first
             sender.send([ItemValue(h, k, v, clock=int(start)) for h, k, v in lld])
-        except (ProcessingError, OSError) as e:
+        except (ProcessingError, OSError, json.JSONDecodeError) as e:
             log.error("discovery send error: %s", e)
 
     FLUSH = settings.ZBX_SENDER_BATCH_SIZE
@@ -392,7 +404,7 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
         try:
             sender.send(batch)
             sent += len(batch)
-        except (ProcessingError, OSError) as e:
+        except (ProcessingError, OSError, json.JSONDecodeError) as e:
             log.error("send error: %s", e)
         batch.clear()
 

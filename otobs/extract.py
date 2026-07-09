@@ -7,14 +7,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from zabbix_utils import ZabbixAPI
+from zabbix_utils import ModuleBaseException, ZabbixAPI
 
 from . import settings
 
 try:
-    from zoneinfo import ZoneInfo
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     _TZ = ZoneInfo(settings.TIMEZONE)
-except Exception:
+except (ZoneInfoNotFoundError, ValueError):
     _TZ = None
 
 _REL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
@@ -78,7 +78,7 @@ def _connect() -> ZabbixAPI:
         api = ZabbixAPI(url=settings.API_URL)
         api.login(user=settings.API_USER, password=settings.API_PASSWORD)
         return api
-    except Exception as e:  # noqa: BLE001
+    except ModuleBaseException as e:
         raise SystemExit(
             f"Cannot log in to the Zabbix API at {settings.API_URL}: {e}\n"
             f"  - stack not up yet? `make up` (first boot imports the DB, ~30-60s; `make logs`)\n"

@@ -21,12 +21,11 @@ def _provisioner(failing: bool) -> Provisioner:
     prov = Provisioner.__new__(Provisioner)  # skip __init__: no real API login
     prov.api = MagicMock()
     if failing:
+        # _item/_triggers/_host are exercised below with existing={}, so they
+        # always take the create branch — only .create needs a side_effect.
         prov.api.item.create.side_effect = APIRequestError("rejected by server")
-        prov.api.item.update.side_effect = APIRequestError("rejected by server")
         prov.api.trigger.create.side_effect = APIRequestError("rejected by server")
-        prov.api.trigger.update.side_effect = APIRequestError("rejected by server")
         prov.api.host.create.side_effect = APIRequestError("rejected by server")
-        prov.api.host.update.side_effect = APIRequestError("rejected by server")
         prov.api.settings.update.side_effect = APIRequestError("rejected by server")
     prov.errors = []
     return prov

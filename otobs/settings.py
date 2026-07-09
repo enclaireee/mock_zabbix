@@ -52,7 +52,7 @@ TIME_SCALE = _f("SIM_TIME_SCALE", 10.0)
 TIMEZONE = os.environ.get("ZBX_TIMEZONE", "UTC")
 
 SIM_POLL_INTERVAL = _f("SIM_POLL_INTERVAL", 0.5)  # live loop: sleep between due-checks
-SIM_SENDER_WORKERS = _i("SIM_SENDER_WORKERS", 4)  # thread pool size for trapper sends
+SIM_SENDER_WORKERS = max(_i("SIM_SENDER_WORKERS", 4), 1)  # thread pool size for trapper sends
 ZBX_SENDER_BATCH_SIZE = _i("ZBX_SENDER_BATCH_SIZE", 500)  # backfill: points per trapper send
 
 LOG_LEVEL = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)

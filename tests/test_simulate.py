@@ -248,6 +248,51 @@ def test_run_offloads_sends_to_a_worker_thread():
         "send() ran on the main thread — I/O is blocking the scheduler again"
 
 
+def test_run_drops_batch_when_send_pool_saturated(monkeypatch, caplog):
+    """A saturated send pool drops the tick's batch (logged) instead of queuing
+    unboundedly — every tick still submits every SIM_POLL_INTERVAL regardless
+    of how many sends are still in flight, so an unguarded submit() would pile
+    up forever against a slow/down Zabbix server."""
+    from otobs import settings
+    monkeypatch.setattr(settings, "SIM_SENDER_WORKERS", 1)
+
+    asset = AssetClass("ac", "hg", "tmpl", "tg", [Host("H", "H")], [param("k")])
+
+    release_first_send = threading.Event()
+    fake_sender = MagicMock()
+
+    def blocking_send(items):
+        release_first_send.wait(timeout=2)  # holds the only worker slot
+        return MagicMock(processed=len(items), failed=0)
+
+    fake_sender.send.side_effect = blocking_send
+
+    clock = {"t": 0.0}
+
+    def fake_monotonic():
+        return clock["t"]
+
+    sleep_calls = {"n": 0}
+
+    def fake_sleep(_secs):
+        sleep_calls["n"] += 1
+        clock["t"] += 100.0  # jump well past next_due so every tick is due again
+        if sleep_calls["n"] == 2:
+            release_first_send.set()  # let tick 1's send finish after tick 2 has tried
+        if sleep_calls["n"] > 3:
+            raise KeyboardInterrupt
+
+    with patch("zabbix_utils.Sender", return_value=fake_sender), \
+         patch("time.sleep", side_effect=fake_sleep), \
+         patch("time.monotonic", side_effect=fake_monotonic), \
+         caplog.at_level("WARNING", logger="otobs.simulate"):
+        with pytest.raises(KeyboardInterrupt):
+            run([asset], cfg=SimConfig())
+
+    assert "sender queue full" in caplog.text, \
+        "expected a saturated-pool tick to log a drop instead of piling up"
+
+
 def _switch_asset():
     """Synthetic switch: 2 per-port prototype params + 1 flat chassis param, 2 hosts."""
     params = [param("net.if.oper_status"), param("net.if.error_rate"), param("net.env.fan_state")]

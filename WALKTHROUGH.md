@@ -959,9 +959,11 @@ Four layers, all offline (no Zabbix required), all fast:
    referenced param key and band must exist. ~20 000 samples in a second or
    two. This is the pre-flight gate: run it after any YAML edit, before
    touching Zabbix.
-2. **`test_sim.py`** — assert-only, no framework
-   (`.venv/bin/python test_sim.py`), one small function per load-bearing
-   claim. The roster: the **disabled == legacy** invariant (seeded RNG,
+2. **`tests/test_simulate.py`, `tests/test_config.py`, `tests/test_provision.py`**
+   — pytest (`make test` / `.venv/bin/pytest tests/ -q`), one small test per
+   load-bearing claim, using `pytest.raises`/`unittest.mock` in place of the
+   hand-rolled fakes the suite used before it moved under `tests/`. The
+   roster: the **disabled == legacy** invariant (seeded RNG,
    byte-identical stream — the realism layer's contract); correlation
    measurably lifts the biased state's rate; trend produces an intermediate
    below-band value (ramp, not step) and progresses; **ramp → walk handoff**
@@ -999,9 +1001,9 @@ Four layers, all offline (no Zabbix required), all fast:
    real stack) are explicitly out of scope for this file — verify those
    manually per [docs/extract-cli.md](docs/extract-cli.md).
 
-Why no pytest: the repo's tests are executable specifications, a few asserts
-each; a framework would add a dependency and fixtures for zero additional
-signal at this scale.
+`test_extract.py` (§4, item 4 above) is the one holdout still on the old
+assert-only/no-framework style, since it belongs to the `extract` CLI work
+tracked separately from this migration.
 
 ---
 
