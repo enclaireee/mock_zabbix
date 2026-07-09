@@ -1,11 +1,11 @@
 {
   "auto_start": "1",
-  "dashboardid": "404",
+  "dashboardid": "405",
   "display_period": "30",
   "name": "GRS - Network Aseets Dashboard",
   "pages": [
     {
-      "dashboard_pageid": "25677",
+      "dashboard_pageid": "25678",
       "display_period": "0",
       "name": "",
       "widgets": [
@@ -36,7 +36,7 @@
           "name": "Problems by Severity - GRS Workstations",
           "type": "problemsbysv",
           "view_mode": "0",
-          "widgetid": "100217",
+          "widgetid": "100206",
           "width": "56",
           "x": "0",
           "y": "0"
@@ -88,7 +88,7 @@
           "name": "Real Time",
           "type": "clock",
           "view_mode": "0",
-          "widgetid": "100218",
+          "widgetid": "100207",
           "width": "16",
           "x": "56",
           "y": "0"
@@ -135,23 +135,13 @@
           "name": "GRS - Equipment Fan State",
           "type": "item",
           "view_mode": "0",
-          "widgetid": "100221",
+          "widgetid": "100208",
           "width": "21",
           "x": "51",
           "y": "2"
         },
         {
           "fields": [
-            {
-              "name": "groupids.0",
-              "type": "2",
-              "value": "25"
-            },
-            {
-              "name": "hostids.0",
-              "type": "3",
-              "value": "10692"
-            },
             {
               "name": "items.0",
               "type": "1",
@@ -296,29 +286,29 @@
               "name": "thresholds.1.threshold",
               "type": "1",
               "value": "2"
+            },
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "26"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10694"
             }
           ],
           "height": "5",
           "name": "Interface Operational Status",
           "type": "honeycomb",
           "view_mode": "0",
-          "widgetid": "100227",
+          "widgetid": "100209",
           "width": "26",
           "x": "0",
           "y": "2"
         },
         {
           "fields": [
-            {
-              "name": "groupids.0",
-              "type": "2",
-              "value": "25"
-            },
-            {
-              "name": "hostids.0",
-              "type": "3",
-              "value": "10692"
-            },
             {
               "name": "items.0",
               "type": "1",
@@ -463,13 +453,23 @@
               "name": "reference",
               "type": "1",
               "value": "XVLPD"
+            },
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "26"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10694"
             }
           ],
           "height": "5",
           "name": "Interface Administrative Status",
           "type": "honeycomb",
           "view_mode": "0",
-          "widgetid": "100228",
+          "widgetid": "100210",
           "width": "25",
           "x": "26",
           "y": "2"
@@ -482,16 +482,6 @@
               "value": "2"
             },
             {
-              "name": "groupids.0",
-              "type": "2",
-              "value": "25"
-            },
-            {
-              "name": "hostids.0",
-              "type": "3",
-              "value": "10692"
-            },
-            {
               "name": "show_opdata",
               "type": "0",
               "value": "2"
@@ -500,13 +490,23 @@
               "name": "reference",
               "type": "1",
               "value": "XNXFK"
+            },
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "26"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10694"
             }
           ],
           "height": "5",
           "name": "",
           "type": "problems",
           "view_mode": "0",
-          "widgetid": "100229",
+          "widgetid": "100211",
           "width": "72",
           "x": "0",
           "y": "7"

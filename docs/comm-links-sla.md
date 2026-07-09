@@ -16,9 +16,11 @@ hand-rolled uptime calculation.
 > are new (see [Technology mix](#technology-mix) — it now covers 8 transports
 > instead of the original's 3).
 
-The lab provisions the **link data** (segment/circuit items + triggers) and
-streams it; the Zabbix **SLA services, SLA object, and dashboard are set up by
-hand** (see [Setting up the SLA yourself](#setting-up-the-sla-yourself-zabbix-ui)).
+The lab provisions the **link data** (segment/circuit items + triggers) *and*
+the Zabbix **SLA services + SLA object** — `make provision` runs both in one
+pass (see [`otobs/sla.py`](../otobs/sla.py)). Only the **dashboard** SLA report
+widget is still set up by hand (see
+[Setting up the SLA yourself](#setting-up-the-sla-yourself-zabbix-ui)).
 
 Catalog: [`catalog/comm_links.yml`](../catalog/comm_links.yml). Simulation
 mechanic: [`otobs/simulate.py`](../otobs/simulate.py) (`segment_forces`).
@@ -189,23 +191,22 @@ SLA report is meant to show.
 
 ## Setting up the SLA yourself (Zabbix UI)
 
-The tooling deliberately stops at the **link data** — the segment/circuit items,
-their triggers, and the live simulation. Building the SLA services, the SLA
-object, and the dashboard is done by hand in Zabbix (that's the intended job).
-Everything below is the plan the data was shaped to support.
+`make provision` now creates the Services and the SLA object automatically
+(`otobs/sla.py`, wired into `Provisioner.apply()`). Only the **dashboard**
+widget is still manual — everything below is the shape it produces / the plan
+the widget binds to.
 
-**The one thing the loader does for you:** each circuit's **high/disaster**
-("down") trigger is pre-tagged `link : <circuit_key>` (e.g.
+**The hook it all runs on:** each circuit's **high/disaster** ("down")
+trigger is pre-tagged `link : <circuit_key>` (e.g.
 `link : circ.pgn_metroe_circuit1`) — deliberately *not* the `warning`-level
-degraded trigger, so a degraded-but-up circuit won't burn SLA. That tag is the
-hook everything else hangs off. Confirm it under *Data collection → Hosts →
-COMM-PGN-NOC01 → Triggers*.
+degraded trigger, so a degraded-but-up circuit won't burn SLA. Confirm it
+under *Data collection → Hosts → COMM-PGN-NOC01 → Triggers*.
 
 > ⚠ **If you already built Services/SLA in Zabbix against the previous catalog
 > version, see [Migration note](#migration-note-if-youve-already-provisioned-this-in-zabbix)
 > below before re-running `make provision`.**
 
-The target shape (Zabbix 7.0 **Services + SLA**, under *Data collection*):
+The shape (Zabbix 7.0 **Services + SLA**, under *Data collection*):
 
 ```
 circuit 'down' trigger  --(event tag: link=<circuit_key>)-->  Service (one per circuit)
@@ -215,19 +216,20 @@ circuit 'down' trigger  --(event tag: link=<circuit_key>)-->  Service (one per c
                              via service_tag sla_group=comm_link         -> 20-row report
 ```
 
-1. **One Service per circuit** (20). Give each a **problem tag** `link` = the
-   circuit key it should track (`circ.pgn_metroe_circuit1`,
-   `circ.pgn_scpc_circuit13`, …), and a plain **tag** `sla_group` = `comm_link`
-   so a single SLA can select them all.
-2. **One SLA object** — *Data collection → SLA → Create SLA*. SLO **98 %**
-   (matches the catalog's `{$SLA_TARGET}` macro), **monthly** period, 24×7
-   schedule, and a **service tag** `sla_group` = `comm_link`. Zabbix computes the
-   SLA report **per service**, so this single SLA already renders one row per
-   circuit — you only need separate SLA objects if a link ever needs a
-   *different* target.
-3. **Dashboard** — a new dashboard with a native **SLA report** widget bound to
-   that SLA object shows all 20 circuits' SLA % with Zabbix's own colouring. Map
-   its bands to the project's Good / Underperform / Failed scheme.
+1. **One Service per circuit** (20) — `make provision` creates/updates/prunes
+   these to match the catalog. Each gets a **problem tag** `link` = the
+   circuit key it tracks (`circ.pgn_metroe_circuit1`, `circ.pgn_scpc_circuit13`,
+   …), and a plain **tag** `sla_group` = `comm_link` so a single SLA can select
+   them all.
+2. **One SLA object**, also auto-managed — SLO from the host's `{$SLA_TARGET}`
+   macro (98 %), **monthly** period, 24×7 schedule, and a **service tag**
+   `sla_group` = `comm_link`. Zabbix computes the SLA report **per service**, so
+   this single SLA already renders one row per circuit — you only need a second
+   SLA object if a link ever needs a *different* target.
+3. **Dashboard** — still by hand: a dashboard with a native **SLA report**
+   widget bound to that SLA object shows all 20 circuits' SLA % with Zabbix's
+   own colouring. Map its bands to the project's Good / Underperform / Failed
+   scheme.
 
 Because a shared or chained span drops every circuit riding it together (the
 simulated dependency above), those circuits' Services will show correlated
@@ -243,8 +245,10 @@ against an earlier version and built Services/an SLA object by hand:
 
 1. **The 20-24 existing Services will orphan.** Their problem-tag `link` values
    point at circuit keys that no longer exist in the catalog, so they'll stop
-   receiving events. Either delete and recreate them against the new
-   `circ.pgn_*_circuitN` keys, or bulk-edit each Service's problem tag value.
+   receiving events. `otobs/sla.py` handles this automatically now — re-running
+   `make provision` prunes any `sla_group=comm_link` Service whose name no
+   longer matches a catalog circuit and creates the new ones; no manual
+   delete/recreate needed.
 2. **The SLA object itself does not need to change.** It selects services by
    the `sla_group=comm_link` tag, which is unaffected by circuit-key renames —
    as long as you re-tag (or recreate) the Services with `sla_group=comm_link`,

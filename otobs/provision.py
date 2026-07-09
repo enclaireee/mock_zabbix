@@ -8,7 +8,7 @@ import logging
 
 from zabbix_utils import ModuleBaseException, ZabbixAPI
 
-from . import settings
+from . import settings, sla
 from .catalog import AssetClass, Parameter, SEVERITY_CODE, load_all
 
 log = logging.getLogger(__name__)
@@ -274,6 +274,9 @@ class Provisioner:
 
         for h in asset.hosts:
             self._host(h, hg_id, template_id, hosts)
+
+        if asset.circuits:
+            sla.reconcile(self, asset)
 
 
 def main() -> None:

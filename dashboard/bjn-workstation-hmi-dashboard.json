@@ -1,11 +1,11 @@
 {
   "auto_start": "1",
-  "dashboardid": "403",
+  "dashboardid": "404",
   "display_period": "30",
   "name": "BJN - Workstation / HMI Dashboard",
   "pages": [
     {
-      "dashboard_pageid": "25676",
+      "dashboard_pageid": "25677",
       "display_period": "0",
       "name": "",
       "widgets": [
@@ -36,7 +36,7 @@
           "name": "Problems by Severity - BJN Workstations",
           "type": "problemsbysv",
           "view_mode": "0",
-          "widgetid": "100195",
+          "widgetid": "100197",
           "width": "56",
           "x": "0",
           "y": "0"
@@ -88,7 +88,7 @@
           "name": "Real Time",
           "type": "clock",
           "view_mode": "0",
-          "widgetid": "100196",
+          "widgetid": "100198",
           "width": "16",
           "x": "56",
           "y": "0"
@@ -145,7 +145,7 @@
           "name": "Memory Load",
           "type": "gauge",
           "view_mode": "0",
-          "widgetid": "100197",
+          "widgetid": "100199",
           "width": "25",
           "x": "0",
           "y": "2"
@@ -202,7 +202,7 @@
           "name": "Memory Available",
           "type": "gauge",
           "view_mode": "0",
-          "widgetid": "100198",
+          "widgetid": "100200",
           "width": "23",
           "x": "25",
           "y": "2"
@@ -259,7 +259,7 @@
           "name": "Free Disk Space",
           "type": "gauge",
           "view_mode": "0",
-          "widgetid": "100199",
+          "widgetid": "100201",
           "width": "24",
           "x": "48",
           "y": "2"
@@ -296,7 +296,7 @@
           "name": "Workstation - CPU Utilization% Graph",
           "type": "svggraph",
           "view_mode": "0",
-          "widgetid": "100200",
+          "widgetid": "100202",
           "width": "25",
           "x": "0",
           "y": "5"
@@ -333,7 +333,7 @@
           "name": "Workstation - Memory Avaliable Graph",
           "type": "svggraph",
           "view_mode": "0",
-          "widgetid": "100201",
+          "widgetid": "100203",
           "width": "23",
           "x": "25",
           "y": "5"
@@ -370,7 +370,7 @@
           "name": "Workstation - Free Disk Space (C:) Graph",
           "type": "svggraph",
           "view_mode": "0",
-          "widgetid": "100202",
+          "widgetid": "100204",
           "width": "24",
           "x": "48",
           "y": "5"
@@ -412,7 +412,7 @@
           "name": "Problems History",
           "type": "problems",
           "view_mode": "0",
-          "widgetid": "100224",
+          "widgetid": "100205",
           "width": "72",
           "x": "0",
           "y": "9"

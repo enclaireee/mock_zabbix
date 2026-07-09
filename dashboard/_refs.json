@@ -1,13 +1,47 @@
 {
-  "group": {},
+  "group": {
+    "23": "Network/Comm Links",
+    "25": "OT/PLC",
+    "26": "Network/Industrial"
+  },
   "host": {
-    "10084": "Zabbix server"
+    "10684": "COMM-PGN-NOC01",
+    "10692": "PLC-S7400-BJN",
+    "10694": "SW-GRS-IE01",
+    "10696": "SW-BJN-IE01",
+    "10698": "HMI-GRS-WW01"
   },
   "item": {
-    "23277": {
-      "host": "Zabbix server",
-      "key": "zabbix[wcache,values]"
+    "50875": {
+      "host": "PROC-BJN",
+      "key": "proc.pressure.inlet"
+    },
+    "50876": {
+      "host": "PROC-BJN",
+      "key": "proc.pressure.outlet"
+    },
+    "50878": {
+      "host": "PROC-BJN",
+      "key": "proc.safety.h2s"
+    },
+    "50895": {
+      "host": "PLC-S7400-TBB",
+      "key": "plc.cpu.operating_mode"
+    },
+    "50896": {
+      "host": "PLC-S7400-TBB",
+      "key": "plc.diag.buffer_last"
+    },
+    "50898": {
+      "host": "PLC-S7400-TBB",
+      "key": "plc.io.channels_faulted"
+    },
+    "50905": {
+      "host": "PLC-S7400-BJN",
+      "key": "plc.rack.module_status"
     }
   },
-  "sla": {}
+  "sla": {
+    "1": "SLA Report 1"
+  }
 }

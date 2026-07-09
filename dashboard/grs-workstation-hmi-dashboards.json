@@ -1,11 +1,11 @@
 {
   "auto_start": "1",
-  "dashboardid": "401",
+  "dashboardid": "406",
   "display_period": "30",
   "name": "GRS - Workstation / HMI Dashboards",
   "pages": [
     {
-      "dashboard_pageid": "25674",
+      "dashboard_pageid": "25679",
       "display_period": "0",
       "name": "",
       "widgets": [
@@ -36,7 +36,7 @@
           "name": "Problems by Severity - GRS Workstations",
           "type": "problemsbysv",
           "view_mode": "0",
-          "widgetid": "100173",
+          "widgetid": "100212",
           "width": "56",
           "x": "0",
           "y": "0"
@@ -88,7 +88,7 @@
           "name": "Real Time",
           "type": "clock",
           "view_mode": "0",
-          "widgetid": "100174",
+          "widgetid": "100213",
           "width": "16",
           "x": "56",
           "y": "0"
@@ -125,7 +125,7 @@
           "name": "Workstation - Memory Avaliable Graph",
           "type": "svggraph",
           "view_mode": "0",
-          "widgetid": "100175",
+          "widgetid": "100214",
           "width": "23",
           "x": "25",
           "y": "5"
@@ -162,7 +162,7 @@
           "name": "Workstation - CPU Utilization% Graph",
           "type": "svggraph",
           "view_mode": "0",
-          "widgetid": "100176",
+          "widgetid": "100215",
           "width": "25",
           "x": "0",
           "y": "5"
@@ -199,7 +199,7 @@
           "name": "Workstation - Free Disk Space (C:) Graph",
           "type": "svggraph",
           "view_mode": "0",
-          "widgetid": "100177",
+          "widgetid": "100216",
           "width": "24",
           "x": "48",
           "y": "5"
@@ -256,7 +256,7 @@
           "name": "Memory Load",
           "type": "gauge",
           "view_mode": "0",
-          "widgetid": "100178",
+          "widgetid": "100217",
           "width": "25",
           "x": "0",
           "y": "2"
@@ -313,7 +313,7 @@
           "name": "Memory Available",
           "type": "gauge",
           "view_mode": "0",
-          "widgetid": "100179",
+          "widgetid": "100218",
           "width": "23",
           "x": "25",
           "y": "2"
@@ -370,7 +370,7 @@
           "name": "Free Disk Space",
           "type": "gauge",
           "view_mode": "0",
-          "widgetid": "100180",
+          "widgetid": "100219",
           "width": "24",
           "x": "48",
           "y": "2"
@@ -412,7 +412,7 @@
           "name": "Problems History",
           "type": "problems",
           "view_mode": "0",
-          "widgetid": "100225",
+          "widgetid": "100220",
           "width": "72",
           "x": "0",
           "y": "9"

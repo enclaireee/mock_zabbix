@@ -1,0 +1,198 @@
+{
+  "auto_start": "1",
+  "dashboardid": "407",
+  "display_period": "30",
+  "name": "SLA 1 Dashboard",
+  "pages": [
+    {
+      "dashboard_pageid": "25680",
+      "display_period": "0",
+      "name": "",
+      "widgets": [
+        {
+          "fields": [
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "23"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10684"
+            },
+            {
+              "name": "show_type",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "PNXQE"
+            }
+          ],
+          "height": "2",
+          "name": "",
+          "type": "problemsbysv",
+          "view_mode": "0",
+          "widgetid": "100221",
+          "width": "56",
+          "x": "0",
+          "y": "0"
+        },
+        {
+          "fields": [
+            {
+              "name": "clock_type",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show.0",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "show.1",
+              "type": "0",
+              "value": "2"
+            },
+            {
+              "name": "time_bold",
+              "type": "0",
+              "value": "1"
+            },
+            {
+              "name": "time_sec",
+              "type": "0",
+              "value": "0"
+            }
+          ],
+          "height": "2",
+          "name": "Local Time",
+          "type": "clock",
+          "view_mode": "0",
+          "widgetid": "100222",
+          "width": "16",
+          "x": "56",
+          "y": "0"
+        },
+        {
+          "fields": [
+            {
+              "name": "slaid.0",
+              "type": "10",
+              "value": "1"
+            },
+            {
+              "name": "show_periods",
+              "type": "0",
+              "value": "2"
+            }
+          ],
+          "height": "9",
+          "name": "SLA Report 1",
+          "type": "slareport",
+          "view_mode": "0",
+          "widgetid": "100223",
+          "width": "72",
+          "x": "0",
+          "y": "2"
+        },
+        {
+          "fields": [
+            {
+              "name": "groupids.0",
+              "type": "2",
+              "value": "23"
+            },
+            {
+              "name": "hostids.0",
+              "type": "3",
+              "value": "10684"
+            },
+            {
+              "name": "items.0",
+              "type": "1",
+              "value": "PGN_Segment1 \u2014 Metro-E fiber, PGN_Station1\u2013PGN_Station2 (Telkom)"
+            },
+            {
+              "name": "items.1",
+              "type": "1",
+              "value": "PGN_Segment2 \u2014 Metro-E fiber, PGN_Station2\u2013PGN_Station3 (Icon+)"
+            },
+            {
+              "name": "items.2",
+              "type": "1",
+              "value": "PGN_Segment3 \u2014 Metro-E fiber, PGN_Station3\u2013PGN_Station4 (Moratelindo)"
+            },
+            {
+              "name": "items.3",
+              "type": "1",
+              "value": "PGN_Segment4 \u2014 MPLS CE port, PGN_Station2\u2013PGN_Station5 (Telkom)"
+            },
+            {
+              "name": "items.4",
+              "type": "1",
+              "value": "PGN_Segment5 \u2014 MPLS CE port, PGN_Station5\u2013PGN_Station6 (Lintasarta)"
+            },
+            {
+              "name": "items.5",
+              "type": "1",
+              "value": "PGN_Segment6 \u2014 MPLS CE port, PGN_Station2\u2013PGN_Station6 (Telkomsat)"
+            },
+            {
+              "name": "items.6",
+              "type": "1",
+              "value": "PGN_Segment7 \u2014 SDH/SONET ring path, PGN_Station3\u2013PGN_Station6 (PGN-owned)"
+            },
+            {
+              "name": "items.7",
+              "type": "1",
+              "value": "PGN_Segment8 \u2014 SDH/SONET ring path, PGN_Station6\u2013PGN_Station4 (PGN-owned)"
+            },
+            {
+              "name": "items.8",
+              "type": "1",
+              "value": "PGN_Segment9 \u2014 SDH/SONET ring path, PGN_Station4\u2013PGN_Station3 (PGN-owned)"
+            },
+            {
+              "name": "items.9",
+              "type": "1",
+              "value": "PGN_Segment10 \u2014 Microwave PTP, PGN_Station4\u2013PGN_Station7 (PGN-owned, Protelindo tower)"
+            },
+            {
+              "name": "items.10",
+              "type": "1",
+              "value": "PGN_Segment11 \u2014 Microwave PTP, PGN_Station7\u2013PGN_Station8 (Telkomsat radio-over-IP)"
+            },
+            {
+              "name": "primary_label",
+              "type": "1",
+              "value": "{ITEM.NAME}"
+            },
+            {
+              "name": "reference",
+              "type": "1",
+              "value": "VHSIE"
+            }
+          ],
+          "height": "3",
+          "name": "",
+          "type": "honeycomb",
+          "view_mode": "0",
+          "widgetid": "100224",
+          "width": "72",
+          "x": "0",
+          "y": "11"
+        }
+      ]
+    }
+  ],
+  "private": "1",
+  "userGroups": [],
+  "userid": "1",
+  "users": [],
+  "uuid": ""
+}
