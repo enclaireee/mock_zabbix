@@ -1,0 +1,70 @@
+# preset: omega — weather-driven cross-asset correlation on top of `realistic`.
+#
+# bmkg.* streams (catalog/bmkg.yml) are driven by otobs/weather_engine.py, a
+# deterministic physics model keyed only on the timestamp — never the sticky
+# state machine. Everything below reacts to that weather via the EXISTING
+# correlation/trend/dropout schemas (no new sim_config fields), same as any
+# other causal chain in this catalog.
+#
+# Substitutions from a generic brief, since this catalog is a gas-transmission
+# SCADA site, not an office/datacenter — there is no HVAC or solar-power asset
+# to correlate against:
+#   * "HVAC & Temperature"   -> ambient heat straining the compressor train's
+#     cooling/lube system (proc.comp.bearing_temp) is the real equivalent here.
+#   * "Solar & Rain"          -> SKIPPED. No solar-power asset exists in this
+#     catalog at all; a made-up `power.solar.output` key would fail
+#     `make config`'s validation (it checks every correlation target against
+#     the real catalog) and wouldn't correspond to anything actually
+#     provisioned in Zabbix. Add a real solar/power catalog file first if this
+#     is wanted.
+#   * "Dust & Sensors"        -> dropout on proc.safety.gas_detection_lel (the
+#     site's real environmental/safety sensor — dust-fouled gas-detector
+#     optics are a documented real O&G failure mode) plus a thermal correlation
+#     onto hmi.cpu.temp (no literal "PLC CPU temp" item exists; hmi.cpu.temp is
+#     the closest real CPU-temperature key).
+#   * "Lightning Interference" -> exactly as specified: a temporary
+#     net.if.error_rate blip, never net.if.oper_status — the link never goes
+#     down, so circuit/host continuity is never broken for the ML dataset.
+#
+# Workflow:  make config MODE=omega && make check && make backfill && make simulate
+
+correlation:
+  enabled: true
+  groups:
+    # -- Weather -> compressor cooling stress (PROC host) --
+    - name: "ambient_heat_cooling_stress"
+      trigger: { param: "bmkg.temp", band: "failed" }
+      affects:
+        - { param: "proc.comp.bearing_temp", bias_band: "underperform", strength: 0.4 }
+
+    # -- Weather -> dust-loaded thermal stress (HMI host) --
+    - name: "dust_thermal_load"
+      trigger: { param: "bmkg.dust_index", band: "failed" }
+      affects:
+        - { param: "hmi.cpu.temp", bias_band: "underperform", strength: 0.3 }
+
+    # -- Weather -> lightning EMI blip (SW host) — a ping, not a link kill --
+    - name: "lightning_emi_blip"
+      trigger: { param: "bmkg.lightning_event", band: "failed" }
+      affects:
+        - { param: "net.if.error_rate", bias_band: "underperform", strength: 0.35 }
+
+# Heat-stressed cooling degrades faster than a typical fault ramp.
+trend:
+  enabled: true
+  ramp_seconds: 1800
+  overrides:
+    proc.comp.bearing_temp: { ramp_seconds: 600 }
+
+# Dust-fouled gas-detector optics intermittently lose signal; nothing else
+# in this preset drops (probability: 0.0 baseline, one explicit override).
+dropout:
+  enabled: true
+  probability: 0.0
+  overrides:
+    proc.safety.gas_detection_lel: { probability: 0.08 }
+
+backfill:
+  enabled: false
+  days: 7
+  speed_multiplier: 500

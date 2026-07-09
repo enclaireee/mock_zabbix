@@ -1,0 +1,106 @@
+# =============================================================================
+# Asset Class: External Environment (regional weather)
+# One shared station, not one per site (catalog/sites.yml): a tropical
+# convective weather system spans the whole simulated area, so GRS/TBB/BJN
+# see the same regional feed rather than three independently-random ones.
+# Values are produced by otobs/weather_engine.py — deterministic in the
+# timestamp only, never the probabilistic state machine (see otobs/simulate.py
+# process_stream's `bmkg.` early-return). `weight`/`jitter` below are inert
+# for these params (kept for catalog schema shape) — no random roll or sample
+# noise ever touches a bmkg.* value.
+# See catalog/README.md for the schema.
+# =============================================================================
+asset_class: "External Environment"
+host_group: "OT/Environment"
+template_name: "Template OT External Environment"
+template_group: "Templates/OT"
+
+hosts:
+  - host: "BMKG-STATION"
+    name: "Regional Weather Station (BMKG feed)"
+
+parameters:
+  - key: "bmkg.temp"
+    name: "Ambient Temperature"
+    value_type: float
+    units: "C"
+    interval: "30s"
+    component: "Environment"
+    collection: "otobs weather_engine.WeatherNode (deterministic, timestamp-only)"
+    failure_mode: "N/A — environmental input, not equipment"
+    source: "BMKG (Badan Meteorologi, Klimatologi, dan Geofisika) telemetry feed, modeled"
+    sim:
+      kind: numeric
+      good: [25, 29]
+      underperform: [29, 32]
+      failed: [32, 35]
+      weights: [good, underperform, failed]
+      jitter: 0
+
+  - key: "bmkg.humidity"
+    name: "Relative Humidity"
+    value_type: float
+    units: "%"
+    interval: "30s"
+    component: "Environment"
+    collection: "otobs weather_engine.WeatherNode (deterministic, timestamp-only)"
+    failure_mode: "N/A — environmental input, not equipment"
+    source: "BMKG telemetry feed, modeled"
+    sim:
+      kind: numeric
+      good: [75, 95]
+      underperform: [65, 75]
+      failed: [50, 65]
+      weights: [good, underperform, failed]
+      jitter: 0
+
+  - key: "bmkg.rain_intensity"
+    name: "Rain Intensity"
+    value_type: float
+    units: "mm/h"
+    interval: "30s"
+    component: "Environment"
+    collection: "otobs weather_engine.WeatherNode (deterministic, timestamp-only)"
+    failure_mode: "N/A — environmental input, not equipment"
+    source: "BMKG telemetry feed, modeled"
+    sim:
+      kind: numeric
+      good: [0, 2]
+      underperform: [2, 15]
+      failed: [15, 45]
+      weights: [good, underperform, failed]
+      jitter: 0
+
+  - key: "bmkg.lightning_event"
+    name: "Lightning Strike Event"
+    value_type: unsigned
+    units: ""
+    interval: "30s"
+    component: "Environment"
+    collection: "otobs weather_engine.WeatherNode (deterministic, timestamp-only)"
+    failure_mode: "N/A — environmental input, not equipment"
+    source: "BMKG telemetry feed, modeled"
+    sim:
+      kind: enum
+      states:
+        - { value: 0, weight: good,   label: "No strike" }
+        - { value: 1, weight: failed, label: "Strike detected" }
+    triggers:
+      - { op: "=", value: 1, severity: info, label: "Lightning strike detected near site" }
+
+  - key: "bmkg.dust_index"
+    name: "Dust Accumulation Index"
+    value_type: float
+    units: "idx"
+    interval: "5m"
+    component: "Environment"
+    collection: "otobs weather_engine.WeatherNode (deterministic, timestamp-only)"
+    failure_mode: "N/A — environmental input, not equipment"
+    source: "BMKG telemetry feed, modeled"
+    sim:
+      kind: numeric
+      good: [0, 30]
+      underperform: [30, 70]
+      failed: [70, 100]
+      weights: [good, underperform, failed]
+      jitter: 0

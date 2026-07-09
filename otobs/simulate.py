@@ -22,6 +22,7 @@ from datetime import datetime
 from . import settings
 from .catalog import AssetClass, Parameter, Sim, State, load_all
 from .sim_config import SimConfig, load_sim_config
+from .weather_engine import WeatherNode
 
 try:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -30,6 +31,15 @@ except (ZoneInfoNotFoundError, ValueError):
     _TZ = None
 
 log = logging.getLogger(__name__)
+
+WEATHER = WeatherNode()
+_WEATHER_FIELDS = {
+    "bmkg.temp": "temp",
+    "bmkg.humidity": "humidity",
+    "bmkg.rain_intensity": "rain_intensity",
+    "bmkg.lightning_event": "lightning_event",
+    "bmkg.dust_index": "dust_index",
+}
 
 
 def _hour(unix_ts: float) -> float:
@@ -111,6 +121,21 @@ def _idx_of_band(sim: Sim, band: str) -> int | None:
     return None
 
 
+def _band_idx_for_value(sim: Sim, value) -> int:
+    """Which State's range contains value — weather streams are driven by
+    physics, not the probabilistic state machine, but still need a band index
+    so correlation rules (and Zabbix triggers) can read good/underperform/failed."""
+    if sim.kind == "enum":
+        for i, st in enumerate(sim.states):
+            if st.value == value:
+                return i
+        return len(sim.states) - 1
+    for i, st in enumerate(sim.states):
+        if st.lo <= value <= st.hi:
+            return i
+    return 0 if value < sim.states[0].lo else len(sim.states) - 1
+
+
 @dataclass
 class Stream:
     host: str
@@ -173,13 +198,22 @@ def _by_host(streams: list[Stream]) -> dict[str, dict[str, Stream]]:
 def correlation_forces(cfg: SimConfig, by_host: dict) -> dict:
     """{(host, param_key): bias_band} for streams to force this tick, based on
     each trigger param's CURRENT (pre-roll) band. Per-host; composable — the
-    first firing group wins for a given target."""
+    first firing group wins for a given target.
+
+    One exception: `bmkg.*` weather triggers resolve against the single shared
+    regional weather host regardless of which host is being iterated (weather
+    isn't scoped to one station like everything else), so omega.yml's groups
+    can target `hvac`/`proc`/`net` params on other hosts without duplicating
+    the weather stream onto every one of them."""
     forced: dict = {}
     if not cfg.correlation.enabled:
         return forced
+    weather = {key: s for sd in by_host.values() for key, s in sd.items()
+              if key.startswith("bmkg.")}
     for host, sd in by_host.items():
         for g in cfg.correlation.groups:
-            trig = sd.get(g.trigger_param)
+            trig = weather.get(g.trigger_param) if g.trigger_param.startswith("bmkg.") \
+                else sd.get(g.trigger_param)
             if trig is None or trig.state_idx is None:
                 continue
             if trig.param.sim.states[trig.state_idx].band != g.trigger_band:
@@ -228,11 +262,25 @@ def segment_forces(assets: list[AssetClass], by_host: dict) -> dict:
 
 
 def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
-                   forced: dict, hour: float):
+                   forced: dict, hour: float, clock: float | None = None):
     """Advance one due stream one tick. Returns the emitted value, or None if the
-    reading was dropped. Shared by live run() and backfill(). Caller owns next_due."""
+    reading was dropped. Shared by live run() and backfill(). Caller owns next_due.
+
+    `clock` is the real Unix instant this reading represents, for weather
+    streams only — NOT the same thing as `now`, which is a scheduling clock
+    (time.monotonic() in the live loop, an arbitrary epoch unrelated to
+    calendar time) and would make WeatherNode's seasonal/diurnal math
+    nonsense. Callers that don't touch bmkg.* streams can omit it."""
     if cfg.dropout.enabled and random.random() < cfg.dropout.prob_for(s.param.key):
         return None
+    field = _WEATHER_FIELDS.get(s.param.key)
+    if field is not None:
+        raw = WEATHER.get_weather(clock if clock is not None else now)[field]
+        s.state_idx = _band_idx_for_value(s.param.sim, raw)
+        value = (s.param.sim.states[s.state_idx].value if s.param.sim.kind == "enum"
+                else _typed(raw, s.param.value_type))
+        s.last_value = value
+        return value
     fb = forced.get((s.host, s.param.key))
     forced_idx = _idx_of_band(s.param.sim, fb) if fb is not None else None
     # MTTR dwell: a self-rolling stream can't leave its band until the window
@@ -312,13 +360,14 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
             if not due:
                 time.sleep(settings.SIM_POLL_INTERVAL)
                 continue
-            hour = _hour(time.time()) if cfg.time_of_day.enabled else 0.0
+            clock = time.time()  # real wall-clock instant, for both hour and weather
+            hour = _hour(clock) if cfg.time_of_day.enabled else 0.0
             forced = correlation_forces(cfg, by_host)
             forced.update(segment_forces(assets, by_host))  # hard segment->circuit force wins
             batch, notes = [], []
             for s in due:
                 s.next_due = now + s.param.interval_s / scale
-                value = process_stream(s, now, scale, cfg, forced, hour)
+                value = process_stream(s, now, scale, cfg, forced, hour, clock)
                 if value is None:
                     continue
                 batch.append(ItemValue(s.host, s.send_key, str(value)))
@@ -419,7 +468,9 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
                 continue
             group_due[iv] = due_t + iv
             for s in groups[iv]:
-                value = process_stream(s, vt, 1.0, cfg, forced, hour)
+                # vt is real historical Unix time already (unlike the live loop's
+                # monotonic `now`), so it doubles as `clock` for weather streams.
+                value = process_stream(s, vt, 1.0, cfg, forced, hour, vt)
                 if value is not None:
                     batch.append(ItemValue(s.host, s.send_key, str(value), clock=int(vt)))
                     if len(batch) >= FLUSH:
