@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 .env
 zbx_db_data/
-
+*.csv
+notebook.ipynb
