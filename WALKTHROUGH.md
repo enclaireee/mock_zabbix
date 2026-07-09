@@ -117,21 +117,24 @@ catalog/                 the single source of truth
   ├─ workstation_hmi.yml asset class: Wonderware HMI PC        (10 params)
   ├─ switch_router.yml   asset class: industrial switch        (5 params)
   ├─ comm_links.yml      comm-link SLA system: 11 segments + 20 circuits (8 WAN techs)
+  ├─ bmkg.yml            asset class: External Environment — regional weather (5 params)
   ├─ sim_config.yml      the ACTIVE realism config (a copy of a preset)
   └─ README.md           the schema quick reference
-presets/                 eight ready-made sim modes for `make config`
+presets/                 nine ready-made sim modes for `make config`
 otobs/                   the Python package (stdlib + zabbix_utils + PyYAML)
   ├─ settings.py         .env → typed settings (no python-dotenv)
   ├─ catalog.py          load + validate catalog/*.yml into dataclasses
   ├─ sim_config.py       load + validate sim_config.yml into dataclasses
   ├─ provision.py        Zabbix API reconciler (config plane)
   ├─ simulate.py         state machine + realism + Trapper push (data plane)
+  ├─ weather_engine.py   deterministic (timestamp-only) weather model (`omega` mode, §5.3)
   ├─ dashboard.py        export/import hand-built dashboards to dashboard/*.json
   ├─ extract.py          read-only SLA/history/trend export to CSV/JSON/table (§13)
   └─ __main__.py         CLI: provision|simulate|backfill|config|list|check|
                           export-dashboards|import-dashboards|extract
 docs/                    one-topic reference docs (see README's doc map)
-test_sim.py              assert-only self-checks for the sim + loaders
+tests/                   pytest suite (conftest, test_simulate, test_config,
+                          test_provision, test_weather)
 test_extract.py          assert-only self-checks for the extract CLI (§13.2)
 dashboard/               exported dashboard JSON + _refs.json (id→name map)
 Makefile                 orchestration (`make help`)
@@ -569,7 +572,7 @@ The load-bearing invariant between them:
 
 > With `sim_config.yml` absent, or every feature `enabled: false`, the output
 > is **byte-for-byte identical** to the plain state machine — same values,
-> same RNG draw sequence. `test_sim.py` asserts this against a seeded RNG.
+> same RNG draw sequence. `tests/test_simulate.py` asserts this against a seeded RNG.
 
 That invariant is why the realism layer was safe to add and is safe to
 extend: `baseline` mode *is* the reference implementation, permanently.
@@ -652,6 +655,16 @@ the *value* (with the fixed precedence above), **dropout** only influences
 the same thing, so there is no "who wins" ambiguity beyond the documented
 ramp > walk > plain ordering.
 
+**One stream type skips this pipeline entirely.** `bmkg.*` weather streams
+(`omega` mode) are intercepted at the very top of `process_stream`, right
+after the dropout roll: the value comes from `WeatherNode.get_weather()`, a
+deterministic function of the real timestamp, and `next_state`/hold/trend/
+`sample_stream` never run for them. `process_stream` takes a separate `clock`
+parameter for this — distinct from `now`, which is a *scheduling* clock
+(`time.monotonic()` live, real time in backfill) and would feed the weather
+model the wrong notion of "what time it is" if reused directly. Full detail:
+[weather-engine.md](docs/weather-engine.md).
+
 ### 5.3 The seven realism features and the real behavior each models
 
 Configured in `catalog/sim_config.yml`; full annotated schema in
@@ -679,7 +692,12 @@ causes, so in-tick ordering can't matter) and, with probability `strength`,
 forces the affected parameter's next state toward `bias_band`, overriding
 both weights *and* stickiness — deliberately, so the cascade is visible
 rather than suppressed by a 0.92 stickiness. Coupling is strictly per-host:
-Grissik's fan failure cannot heat Bojonegara's CPU.
+Grissik's fan failure cannot heat Bojonegara's CPU. One deliberate exception:
+`omega` mode's `bmkg.*` weather triggers resolve against the single shared
+regional weather station regardless of which host is being evaluated —
+weather isn't scoped to one site like everything else, so a heat/dust/
+lightning group can drive every site's compressor/HMI/switch at once without
+duplicating the weather stream onto each host. Detail: [weather-engine.md](docs/weather-engine.md).
 
 **3. `trend` (`ramp_seconds` + per-param overrides)** — real transitions are
 *curves, not steps*: wear develops. On a band transition, the value ramps
@@ -758,8 +776,9 @@ referenced param key and band must exist, every number in range) and only
 then copies it over `catalog/sim_config.yml`. A typo'd mode or a broken file
 fails loudly and changes nothing. With no argument it prints the active mode
 — detected by content-matching the live file against the presets — plus
-what's available. Eight ship: `baseline` (reference, all off), `steady`,
-`realistic` (flagship), `diurnal`, `stress`, `maintenance`, `demo`, `ml`;
+what's available. Nine ship: `baseline` (reference, all off), `steady`,
+`realistic` (flagship), `diurnal`, `stress`, `maintenance`, `demo`, `ml`,
+`omega` (weather-driven cross-asset correlation, layered on `realistic`);
 their intents and per-feature settings are tabulated in
 [docs/sim-config.md](docs/sim-config.md). The workflow is always
 **config → (optional) backfill → simulate**.
@@ -945,6 +964,34 @@ with the `realistic` mode active and `SIM_TIME_SCALE=10`.
    — degradation is *selective*, another statistical property real datasets
    have and uniform-random mocks don't).
 
+### 7.5 Weather — `bmkg.temp` on `BMKG-STATION` → `proc.comp.bearing_temp` (`omega` mode)
+
+1. **Definition** — `catalog/bmkg.yml`: float, °C, `30s`, bands 25–29 /
+   29–32 / 32–35, one shared host (`BMKG-STATION`, not per-site). `jitter: 0`
+   is inert here — see step 3.
+2. **Load/Provision** — a normal flat asset class, standard reconcile; no
+   discovery, no `host_template`.
+3. **Simulate** — the interesting part: `process_stream` intercepts
+   `bmkg.temp` before the state machine ever runs. `WeatherNode.get_weather`
+   computes temperature from `clock` alone (a seasonal cosine × an asymmetric
+   diurnal curve), and `_band_idx_for_value` maps it onto the catalog's bands
+   so the rest of the pipeline can read a band exactly like any other stream.
+   On a hot dry-season afternoon that lands in `failed`. `omega.yml`'s
+   `ambient_heat_cooling_stress` group reads that band and, with p=0.4,
+   biases `proc.comp.bearing_temp` — on **every** site's PROC host at once,
+   the one correlation group in this catalog that crosses hosts (§5.3) —
+   toward `underperform`, ramping over the mode's shortened 600 s window
+   (heat-stressed cooling degrades faster than the catalog's default fault
+   ramp).
+4. **Backfill note** — `WeatherNode.get_weather` is a pure function of the
+   timestamp, so `make backfill` and the live stream that follows it agree on
+   "what the weather was" at the join, with no re-run drift.
+5. **Observe** — Latest data on `BMKG-STATION` shows a smooth diurnal/
+   seasonal curve (no jitter, no scatter — it's physics, not a random walk);
+   Problems on GRS/TBB/BJN's PROC hosts light up together on a hot day,
+   correlated across sites by one shared cause instead of three independent
+   coincidences.
+
 ---
 
 ## 8. Testing & validation
@@ -959,8 +1006,8 @@ Four layers, all offline (no Zabbix required), all fast:
    referenced param key and band must exist. ~20 000 samples in a second or
    two. This is the pre-flight gate: run it after any YAML edit, before
    touching Zabbix.
-2. **`tests/test_simulate.py`, `tests/test_config.py`, `tests/test_provision.py`**
-   — pytest (`make test` / `.venv/bin/pytest tests/ -q`), one small test per
+2. **`tests/test_simulate.py`, `tests/test_config.py`, `tests/test_provision.py`,
+   `tests/test_weather.py`** — pytest (`make test` / `.venv/bin/pytest tests/ -q`), one small test per
    load-bearing claim, using `pytest.raises`/`unittest.mock` in place of the
    hand-rolled fakes the suite used before it moved under `tests/`. The
    roster: the **disabled == legacy** invariant (seeded RNG,
@@ -983,6 +1030,15 @@ Four layers, all offline (no Zabbix required), all fast:
    and that a rejected `item`/`trigger`/`host`/geomap call is recorded into
    `Provisioner.errors` rather than raised, against a minimal fake API (proof
    that one bad object can't abort the objects behind it — §4.3.1).
+   `test_weather.py` additionally pins: `WeatherNode.get_weather` determinism
+   across instances and ranges; the 7-day dust lookback actually reaches the
+   `failed` band under realistic conditions (a shorter, since-fixed lookback
+   silently couldn't); `process_stream` bypasses the state machine for
+   `bmkg.*` keys and ignores `now` in favor of `clock`; `correlation_forces`
+   resolves a `bmkg.*` trigger across every host that has a matching
+   `affects` param, while every other trigger's same-host scoping is
+   unchanged (§5.3); and `presets/omega.yml` validates against the real
+   catalog.
 3. **Provision-time validation** — `make config` re-validates a preset
    before activating it; `provision` itself only ever sees a catalog that
    already parsed. The reconciler's happy path (create, update, prune,
@@ -1128,6 +1184,17 @@ precedence rather than one sampling formula — priced in, and paid once, in
 - **`SIM_TIME_SCALE` compresses live time but backfill uses real intervals**
   — deliberate: live is for watching, history is for training, and training
   data must have physically-correct spacing.
+- **The diurnal temperature curve is an asymmetric double-cosine, not full
+  Parton & Logan solar geometry** — the real model needs latitude and
+  day-length inputs this mock generator doesn't carry; the double-cosine
+  hits the same two anchors (05:00 min, 14:00 max) with the same fast-rise/
+  slow-fall asymmetry, which is what a mock generator needs, not sunrise-
+  accurate physics.
+- **`omega`'s weather correlations target the closest *real* catalog keys,
+  not literal HVAC/solar assets** — this catalog is a gas-transmission SCADA
+  site with no such asset classes; inventing fake ones would fail `make
+  config`'s own validation. Full substitution rationale: `presets/omega.yml`'s
+  header comment and [weather-engine.md](docs/weather-engine.md).
 
 ### 10.7 Not built, on purpose (YAGNI with a map)
 
@@ -1221,7 +1288,7 @@ data gaps.
 **"Doesn't the realism layer change the production story?"** No — it's
 data-plane only. Items, triggers, templates are untouched by it, and with
 everything disabled the simulator is byte-identical to the plain machine
-(asserted in `test_sim.py` against a seeded RNG).
+(asserted in `tests/test_simulate.py` against a seeded RNG).
 
 **"How do modes and backfill relate?"** `make config MODE=x` activates a
 validated preset; `make backfill` — always manual, never automatic — replays
@@ -1235,13 +1302,13 @@ controls generation pace.
 
 **"How is correlation not just noise?"** It's causal (reads the trigger's
 pre-roll band), per-host, and directional (named trigger → named affected,
-tunable strength). `test_sim.py` shows it measurably raises the affected
+tunable strength). `tests/test_simulate.py` shows it measurably raises the affected
 parameter's biased-state rate over the independent baseline.
 
 **"What stops a bad config from corrupting Zabbix?"** Three validation
 layers, all before any API call or send: catalog at load (§3.6), sim-config
 ranges at load, cross-references at `make check`/`make config`. A preset
-typo fails in `test_sim.py` before it can fail in a demo.
+typo fails in `tests/test_config.py` before it can fail in a demo.
 
 **"What happens if I edit or remove a parameter?"** Provision reconciles:
 changed fields update in place, removed objects are pruned (triggers before

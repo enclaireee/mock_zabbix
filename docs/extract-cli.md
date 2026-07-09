@@ -155,7 +155,9 @@ matching rows prints an explicit message instead of writing an empty file.
 
 `test_extract.py` covers the offline-testable pieces — date parsing, column
 validation, the history-vs-trend decision, and the pagination cursor — with
-no live Zabbix connection, same assert-only style as `test_sim.py`. The live
+no live Zabbix connection, the same assert-only style `test_sim.py` used
+before the rest of the suite moved to pytest under `tests/*.py` (WALKTHROUGH.md
+§8). The live
 API paths (`sla.get`/`sla.getsli`/`history.get`/`trend.get`/`item.get`
 against a real stack) aren't covered by an automated test; verify them
 against the running stack (`make up && make provision`, build the SLA object

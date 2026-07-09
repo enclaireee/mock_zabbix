@@ -5,7 +5,12 @@ A self-contained lab that runs a **real Zabbix 7.0 server locally** and feeds it
 catalog (PLC Siemens S7-400, Workstation/HMI, Industrial Switch/Router, Gas
 Process) — plus a fifth **communication-link system** that models the 24
 inter-station "Media Link Komunikasi" links (fiber segments + logical circuits)
-so you can build the Zabbix SLA services and dashboard on top of live link data.
+so you can build the Zabbix SLA services and dashboard on top of live link data,
+and a sixth **External Environment** layer: a deterministic weather engine
+(`otobs/weather_engine.py`) that drives regional temperature/humidity/rain/
+lightning/dust and, in the `omega` sim mode, causally correlates it into the
+other five asset classes (heat stresses compressor cooling, dust fouls a gas
+detector and loads CPU, lightning blips network error rates).
 
 Every parameter cycles through the three condition classes from the report —
 **Good → Underperform → Failed** — so you can watch real triggers fire and build
@@ -53,6 +58,7 @@ topic; WALKTHROUGH.md is the deep version that synthesizes across them.
 | **[catalog/README.md](catalog/README.md)** | What's the YAML schema for `catalog/*.yml`? |
 | **[docs/sim-states.md](docs/sim-states.md)** | How does the simulator state machine work (states, bands, sticky transitions)? |
 | **[docs/sim-config.md](docs/sim-config.md)** | The sim **modes** (`make config`) and the seven `sim_config.yml` realism features, in full. |
+| **[docs/weather-engine.md](docs/weather-engine.md)** | The `omega` mode's deterministic weather model, and how it correlates into the other five asset classes. |
 | **[docs/band-weights.md](docs/band-weights.md)** | What do the `good`/`underperform`/`failed` weight tokens mean? |
 | **[docs/env-loading.md](docs/env-loading.md)** | How does `.env` get parsed into settings? |
 | **[docs/geomap.md](docs/geomap.md)** | How does the Zabbix Geomap widget get wired up? |
@@ -65,12 +71,14 @@ topic; WALKTHROUGH.md is the deep version that synthesizes across them.
 
 ```
 catalog/            asset-class definitions (the source of truth) + schema docs
+  ├─ bmkg.yml       asset class: External Environment (regional weather, one shared station)
   └─ sim_config.yml active realism config (continuity/correlation/trend/time-of-day/dropout/hold/backfill)
-presets/            ready-made sim modes copied in by `make config` (baseline/steady/realistic/diurnal/stress/maintenance/demo/ml)
+presets/            ready-made sim modes copied in by `make config` (baseline/steady/realistic/diurnal/stress/maintenance/demo/ml/omega)
 otobs/              python package
   ├─ catalog.py     load + validate catalog/*.yml into typed objects (incl. segments/circuits)
   ├─ provision.py   Zabbix API: templates, items, triggers, hosts (idempotent)
   ├─ simulate.py    sticky Good/Underperform/Failed state machine → Trapper (+ backfill)
+  ├─ weather_engine.py  deterministic (timestamp-only) weather model for the `omega` mode
   ├─ sim_config.py  load + validate sim_config.yml into typed objects
   ├─ settings.py    reads .env
   ├─ extract.py     read-only SLA/history/trend export to CSV/JSON/table

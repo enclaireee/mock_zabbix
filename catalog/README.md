@@ -63,6 +63,13 @@ station. Inventory for generated hosts is filled from the site automatically.
 `component`, `collection`, `failure_mode`, `source`, `interval` are embedded into
 the Zabbix item **description** — living documentation inside the tool.
 
+> **One exception:** `bmkg.yml`'s five `bmkg.*` parameters still declare a
+> normal `sim:` block (bands/triggers work exactly the same), but their
+> *value* comes from `otobs/weather_engine.py` — a deterministic model keyed
+> only on the timestamp — not from the random weighted/sticky draw described
+> below. `weight`/`jitter` on those five are inert (kept so the file matches
+> this schema) — see [docs/weather-engine.md](../docs/weather-engine.md).
+
 ## `sim` — two kinds
 
 **numeric** — three value bands; by default the simulator samples uniformly within

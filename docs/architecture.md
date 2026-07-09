@@ -41,6 +41,7 @@ the real collector:
 | `simulate` Trapper push    | Zabbix Agent 2 (CPU/RAM/disk/SMART/NIC)            |
 | `simulate` Trapper push    | LibreHardwareMonitor → WMI → Zabbix Agent          |
 | `simulate` Trapper push    | SNMP poller (IF-MIB, CISCO-ENVMON-MIB)             |
+| `otobs/weather_engine.py` (deterministic model) | BMKG (Badan Meteorologi, Klimatologi, dan Geofisika) API/telemetry feed, or a site weather station |
 
 Because the **config plane is identical**, swapping a mock for a real collector
 is just changing the item type (Trapper → Agent/SNMP) on the template — the
@@ -109,3 +110,12 @@ This is a **data-plane** change only: the config plane (items, triggers,
 templates) is untouched, so the production swap-in story is unaffected. `make
 check` validates the file against the catalog. Full schema and semantics:
 [sim-config.md](sim-config.md); the state machine itself: [sim-states.md](sim-states.md).
+
+The `omega` mode layers one more thing on top: a regional weather feed
+(`catalog/bmkg.yml`) computed by a **deterministic** model — a pure function
+of the timestamp, not the probabilistic state machine above — that
+`correlation` then couples into the other five asset classes (heat →
+compressor cooling stress, dust → sensor dropout + CPU thermal load,
+lightning → a temporary network error-rate blip). Full model and the one
+architectural exception it needed (a cross-host correlation trigger):
+[weather-engine.md](weather-engine.md).

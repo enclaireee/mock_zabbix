@@ -112,6 +112,7 @@ make config MODE=maintenance   # sensors/links dropping in and out (lots of noda
 make config MODE=demo          # punchy fast cascades for a 5-minute live walkthrough
 make config MODE=ml            # long smooth labelled curves, for Tahap 2/3 training
 make config MODE=baseline      # every feature off (the reference behavior)
+make config MODE=omega         # weather-driven cross-asset correlation (heat/dust/lightning)
 make config FILE=mine.yml      # your own custom file
 
 make backfill                  # optional: replay the active mode over its past window

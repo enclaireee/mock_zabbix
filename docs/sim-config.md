@@ -50,6 +50,7 @@ Override per run with `DAYS=` / `SPEED=`.
 | **maintenance** | Sensors/links in and out of service — lots of data gaps, plant stays healthy. | ✅ | – | ✅ | – | ✅ (uneven) | 3 | – |
 | **demo** | Punchy 5-minute live walkthrough: fast, obvious cascades. | ✅ | ✅ (strong) | ✅ (short) | – | ✅ (light) | 1 | lower `SIM_STICKINESS` ≈0.85 |
 | **ml** | Training data for Tahap 2/3 (clustering, RUL): long smooth labelled curves. | ✅ | ✅ (web) | ✅ (long) | – | – | 30 | raise `SIM_STICKINESS` ≈0.97 |
+| **omega** | Layers weather-driven cross-asset correlation (`catalog/bmkg.yml`) on top of `realistic` — heat/dust/lightning cascades. | – | ✅ (weather) | ✅ (short) | – | ✅ (targeted) | 7 | – |
 
 > The table omits a seventh feature, **`hold`** (MTTR dwell, §6 below), to stay
 > readable: only **realistic** ships it on, setting comm-link repair-time windows
@@ -89,7 +90,7 @@ cascades and occasionally goes quiet — like a plant, not a random number gener
 
 Every feature defaults **off** and is a strict no-op when disabled. With all off (or
 the file absent) the simulator is exactly the sticky state machine of the baseline —
-`test_sim.py` asserts this byte-for-byte against a seeded RNG.
+`tests/test_simulate.py` asserts this byte-for-byte against a seeded RNG.
 
 ### 1. `continuity` — values move, they don't teleport
 
@@ -145,6 +146,17 @@ correlation:
 Physically-real chains shipped in the presets: `thermal_cascade` (fan → CPU temp),
 `lube_starvation` (lube-oil pressure → bearing temp → vibration), `filter_choke`
 (filter dP → flow), `switch_thermal` (switch fan → CRC errors).
+
+**One exception to "same host":** `bmkg.*` weather triggers (`omega` mode,
+[`catalog/bmkg.yml`](../catalog/bmkg.yml)) resolve against the single shared
+regional weather station regardless of which host is being evaluated, so one
+weather group can drive `affects` on every site's PROC/HMI/SW host without
+duplicating the weather stream onto each one. This is the *only* cross-host
+trigger the engine supports — it's special-cased in `correlation_forces`
+specifically for `bmkg.`-prefixed keys; every other trigger stays strictly
+per-host. See [weather-engine.md](weather-engine.md) for the physics model
+and how `process_stream` routes `bmkg.*` streams around the state machine
+entirely.
 
 ### 3. `trend` — transitions ramp, they don't step
 
@@ -278,5 +290,6 @@ probability, zero ramp, hour > 24 all fail loudly), **and** that `trend.override
 `time_of_day.profiles` target *numeric* parameters — on an enum param both are silent
 no-ops (a fixed value has no ramp and no setpoint), so dead config is rejected rather
 than ignored. All of this runs **before** any data is sent. The shipped presets are
-additionally checked in `test_sim.py` (`test_presets_validate_against_catalog`), so a
-typo in a mode file is caught in the test suite, not at run time.
+additionally checked in `tests/test_config.py` (`test_presets_validate_against_catalog`)
+and `tests/test_weather.py` (`test_omega_preset_validates_against_the_real_catalog`),
+so a typo in a mode file is caught in the test suite, not at run time.
