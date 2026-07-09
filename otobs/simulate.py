@@ -325,13 +325,18 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
              "Ctrl+C to stop.", len(streams), settings.SENDER_HOST, settings.SENDER_PORT,
              settings.STICKINESS, scale, feats)
 
+    # AttributeError here is zabbix_utils itself: TrapperResponse.parse() (sender.py)
+    # regex-matches the server's "processed: N; failed: N; ..." info string with no
+    # None-check, so a reply it doesn't recognize (e.g. values rejected as older than
+    # an item's history retention) raises AttributeError instead of ProcessingError —
+    # would otherwise kill a live/backfill run outright instead of logging and moving on.
     lld = discovery_payloads(assets)
     if lld:
         try:
             sender.send([ItemValue(h, k, v) for h, k, v in lld])
             log.info("Sent %d LLD discovery payload(s) — per-port items appear once the "
                      "server processes the trap (a few seconds).", len(lld))
-        except (ProcessingError, OSError, json.JSONDecodeError) as e:
+        except (ProcessingError, OSError, json.JSONDecodeError, AttributeError) as e:
             log.error("discovery send error: %s", e)
 
     # Bounds in-flight sends to SIM_SENDER_WORKERS: a saturated pool drops this
@@ -348,7 +353,7 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
             fail = getattr(resp, "failed", "?")
             tail = ("  | " + ", ".join(notes[:4]) + ("…" if len(notes) > 4 else "")) if notes else ""
             log.info("sent=%d processed=%s failed=%s%s", len(batch), ok, fail, tail)
-        except (ProcessingError, OSError, json.JSONDecodeError) as e:
+        except (ProcessingError, OSError, json.JSONDecodeError, AttributeError) as e:
             log.error("send error: %s", e)
         finally:
             send_slots.release()
@@ -439,7 +444,7 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     if lld:
         try:  # seed discovery at the window start so per-port items exist first
             sender.send([ItemValue(h, k, v, clock=int(start)) for h, k, v in lld])
-        except (ProcessingError, OSError, json.JSONDecodeError) as e:
+        except (ProcessingError, OSError, json.JSONDecodeError, AttributeError) as e:
             log.error("discovery send error: %s", e)
 
     FLUSH = settings.ZBX_SENDER_BATCH_SIZE
@@ -453,7 +458,7 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
         try:
             sender.send(batch)
             sent += len(batch)
-        except (ProcessingError, OSError, json.JSONDecodeError) as e:
+        except (ProcessingError, OSError, json.JSONDecodeError, AttributeError) as e:
             log.error("send error: %s", e)
         batch.clear()
 

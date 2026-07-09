@@ -50,7 +50,6 @@ parameters:
     collection: "native SNMP (IF-MIB ifAdminStatus 1.3.6.1.2.1.2.2.1.7)"
     failure_mode: "STP loop protection, Port Security MAC block, IT misconfig"
     source: "RFC 2863 IF-MIB, 2003"
-    # Binary admin state: Good/Failed only (see oper_status note).
     sim:
       kind: enum
       states:
