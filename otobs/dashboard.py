@@ -9,16 +9,18 @@ import re-resolves those names to whatever the ids are *now* before recreating
 each dashboard, so a raw id copy wouldn't survive a clean+reprovision cycle."""
 from __future__ import annotations
 import json
+import logging
 import re
 
-from zabbix_utils import ZabbixAPI
+from zabbix_utils import ModuleBaseException, ZabbixAPI
 
 from . import settings
+
+log = logging.getLogger(__name__)
 
 EXPORT_DIR = settings.ROOT / "dashboard"
 REFS_FILE = EXPORT_DIR / "_refs.json"
 
-# widget field name (with trailing ".N" stripped) -> ref kind it points at
 _REF_KIND = {"groupids": "group", "hostids": "host", "itemid": "item", "slaid": "sla"}
 
 
@@ -70,9 +72,9 @@ def export_all() -> None:
     for d in dashboards:
         path = EXPORT_DIR / f"{_slug(d['name'])}.json"
         path.write_text(json.dumps(d, indent=2, sort_keys=True) + "\n")
-        print(f"  wrote {path.relative_to(settings.ROOT)}")
+        log.info("wrote %s", path.relative_to(settings.ROOT))
     REFS_FILE.write_text(json.dumps(refs, indent=2, sort_keys=True) + "\n")
-    print(f"\nExported {len(dashboards)} dashboard(s) to {EXPORT_DIR.relative_to(settings.ROOT)}/")
+    log.info("Exported %d dashboard(s) to %s/", len(dashboards), EXPORT_DIR.relative_to(settings.ROOT))
 
 
 def _remap(api, refs: dict) -> dict[str, str]:
@@ -128,7 +130,7 @@ def import_all() -> None:
                 continue
             d = json.loads(path.read_text())
             if d["name"] in existing:
-                print(f"  skip '{d['name']}' (already exists)")
+                log.info("skip '%s' (already exists)", d["name"])
                 continue
 
             payload = {k: v for k, v in d.items() if k not in ("dashboardid", "uuid")}
@@ -145,13 +147,14 @@ def import_all() -> None:
                                 stale_refs += 1
             try:
                 api.dashboard.create(**payload)
-                print(f"  created '{d['name']}'")
-            except Exception as e:  # noqa: BLE001
-                print(f"  ! FAILED '{d['name']}': {e}")
+                log.info("created '%s'", d["name"])
+            except ModuleBaseException as e:
+                log.error("FAILED '%s': %s", d["name"], e)
 
         if stale_refs:
-            print(f"\n{stale_refs} widget field(s) pointed at a group/host/item/SLA that no "
-                  f"longer resolves by name (catalog changed?) — left as the old, likely-dead id.")
+            log.warning("%d widget field(s) pointed at a group/host/item/SLA that no longer "
+                       "resolves by name (catalog changed?) — left as the old, likely-dead id.",
+                       stale_refs)
     finally:
         api.logout()
 
@@ -159,7 +162,7 @@ def import_all() -> None:
 def export_main() -> None:
     try:
         export_all()
-    except Exception as e:  # noqa: BLE001
+    except ModuleBaseException as e:
         raise SystemExit(
             f"Cannot log in to the Zabbix API at {settings.API_URL}: {e}\n"
             f"  - stack not up yet? `make up`\n"
@@ -169,7 +172,7 @@ def export_main() -> None:
 def import_main() -> None:
     try:
         import_all()
-    except Exception as e:  # noqa: BLE001
+    except ModuleBaseException as e:
         raise SystemExit(
             f"Cannot log in to the Zabbix API at {settings.API_URL}: {e}\n"
             f"  - stack not up yet? `make up`\n"

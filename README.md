@@ -57,6 +57,7 @@ topic; WALKTHROUGH.md is the deep version that synthesizes across them.
 | **[docs/env-loading.md](docs/env-loading.md)** | How does `.env` get parsed into settings? |
 | **[docs/geomap.md](docs/geomap.md)** | How does the Zabbix Geomap widget get wired up? |
 | **[docs/comm-links-sla.md](docs/comm-links-sla.md)** | The fifth system: comm-link segments/circuits, the shared-fiber dependency, and how to build the Zabbix SLA services/dashboard on top of it yourself. |
+| **[docs/extract-cli.md](docs/extract-cli.md)** | How do I pull SLA/history/trend data back out of Zabbix into CSV/JSON? |
 | **[docs/provisioning-idempotency.md](docs/provisioning-idempotency.md)** | Why is `make provision` safe to re-run? |
 | **[docs/zabbix-codes.md](docs/zabbix-codes.md)** | What integer codes does the Zabbix API expect for types/severities? |
 
@@ -72,7 +73,8 @@ otobs/              python package
   ├─ simulate.py    sticky Good/Underperform/Failed state machine → Trapper (+ backfill)
   ├─ sim_config.py  load + validate sim_config.yml into typed objects
   ├─ settings.py    reads .env
-  └─ __main__.py    CLI: provision | simulate | backfill | config | list | check
+  ├─ extract.py     read-only SLA/history/trend export to CSV/JSON/table
+  └─ __main__.py    CLI: provision | simulate | backfill | config | list | check | extract
 docs/               architecture + implementation-detail reference docs (see map above)
 RUNNING.md          install / run / configure / troubleshoot
 WALKTHROUGH.md      the complete technical reference (+ demo script, Q&A)

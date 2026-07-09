@@ -4,23 +4,27 @@ trapper items, triggers, and hosts. Idempotent — safe to re-run.
 Items and triggers live on one Template per asset class; each host links its
 template, so a metric is defined once regardless of how many stations exist."""
 from __future__ import annotations
-from zabbix_utils import ZabbixAPI
+import logging
+
+from zabbix_utils import ModuleBaseException, ZabbixAPI
 
 from . import settings
 from .catalog import AssetClass, Parameter, SEVERITY_CODE, load_all
+
+log = logging.getLogger(__name__)
 
 
 class Provisioner:
     def __init__(self) -> None:
         self.api = ZabbixAPI(url=settings.API_URL)
         self.api.login(user=settings.API_USER, password=settings.API_PASSWORD)
-        print(f"Connected to Zabbix API {self.api.api_version()} as {settings.API_USER}")
+        log.info("Connected to Zabbix API %s as %s", self.api.api_version(), settings.API_USER)
         self.errors: list[str] = []
 
     def close(self) -> None:
         try:
             self.api.logout()
-        except Exception:  # noqa: BLE001
+        except ModuleBaseException:
             pass
 
     def _fail(self, where: str, e: Exception) -> None:
@@ -28,7 +32,7 @@ class Provisioner:
         host (e.g. Zabbix refusing a value_type change on an item with history)
         must not abort every other object still waiting to be reconciled."""
         self.errors.append(f"{where}: {e}")
-        print(f"    ! FAILED {where}: {e}")
+        log.warning("FAILED %s: %s", where, e)
 
     def _templategroup(self, name: str) -> str:
         got = self.api.templategroup.get(filter={"name": [name]}, output=["groupid"])
@@ -52,13 +56,13 @@ class Provisioner:
         try:
             if got is None:
                 self.api.item.create(hostid=template_id, key_=p.key, type=2, **want)
-                print(f"    + item {p.key}")
+                log.info("+ item %s", p.key)
                 return
             diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
             if diff:
                 self.api.item.update(itemid=got["itemid"], **diff)
-                print(f"    ~ item {p.key} (updated: {', '.join(diff)})")
-        except Exception as e:  # noqa: BLE001
+                log.info("~ item %s (updated: %s)", p.key, ", ".join(diff))
+        except ModuleBaseException as e:
             self._fail(f"item {p.key}", e)
 
     @staticmethod
@@ -75,15 +79,15 @@ class Provisioner:
                 if got is None:
                     self.api.trigger.create(description=desc, **want,
                                             **({"tags": t.tags} if t.tags else {}))
-                    print(f"      ! trigger [{t.severity}] {t.label}")
+                    log.info("! trigger [%s] %s", t.severity, t.label)
                     continue
                 diff = {k: v for k, v in want.items() if str(got[k]) != str(v)}
                 if t.tags and self._norm_tags(got.get("tags")) != self._norm_tags(t.tags):
                     diff["tags"] = t.tags
                 if diff:
                     self.api.trigger.update(triggerid=got["triggerid"], **diff)
-                    print(f"      ~ trigger [{t.severity}] {t.label} (updated: {', '.join(diff)})")
-            except Exception as e:  # noqa: BLE001
+                    log.info("~ trigger [%s] %s (updated: %s)", t.severity, t.label, ", ".join(diff))
+            except ModuleBaseException as e:
                 self._fail(f"trigger '{desc}'", e)
 
     def _discovery(self, template_id: str, template_name: str, disc,
@@ -99,12 +103,12 @@ class Provisioner:
                 lld_id = got[0]["itemid"]
                 if str(got[0]["name"]) != disc.name:
                     self.api.discoveryrule.update(itemid=lld_id, name=disc.name)
-                    print(f"    ~ LLD rule {disc.key} (name)")
+                    log.info("~ LLD rule %s (name)", disc.key)
             else:
                 lld_id = self.api.discoveryrule.create(
                     hostid=template_id, name=disc.name, key_=disc.key, type=2)["itemids"][0]
-                print(f"    + LLD rule {disc.key}")
-        except Exception as e:  # noqa: BLE001
+                log.info("+ LLD rule %s", disc.key)
+        except ModuleBaseException as e:
             self._fail(f"LLD rule {disc.key}", e)
             return
 
@@ -122,13 +126,13 @@ class Provisioner:
                 if g is None:
                     self.api.itemprototype.create(hostid=template_id, ruleid=lld_id,
                         key_=pkey, type=2, **want)
-                    print(f"    + item prototype {pkey}")
+                    log.info("+ item prototype %s", pkey)
                 else:
                     diff = {k: v for k, v in want.items() if str(g[k]) != str(v)}
                     if diff:
                         self.api.itemprototype.update(itemid=g["itemid"], **diff)
-                        print(f"    ~ item prototype {pkey} (updated: {', '.join(diff)})")
-            except Exception as e:  # noqa: BLE001
+                        log.info("~ item prototype %s (updated: %s)", pkey, ", ".join(diff))
+            except ModuleBaseException as e:
                 self._fail(f"item prototype {pkey}", e)
 
         existing_tp = {t["description"]: t for t in self.api.triggerprototype.get(
@@ -146,14 +150,14 @@ class Provisioner:
                 try:
                     if g is None:
                         self.api.triggerprototype.create(description=desc, **want)
-                        print(f"      ! trigger prototype [{t.severity}] {t.label}")
+                        log.info("! trigger prototype [%s] %s", t.severity, t.label)
                     else:
                         diff = {k: v for k, v in want.items() if str(g[k]) != str(v)}
                         if diff:
                             self.api.triggerprototype.update(triggerid=g["triggerid"], **diff)
-                            print(f"      ~ trigger prototype [{t.severity}] {t.label} "
-                                  f"(updated: {', '.join(diff)})")
-                except Exception as e:  # noqa: BLE001
+                            log.info("~ trigger prototype [%s] %s (updated: %s)",
+                                    t.severity, t.label, ", ".join(diff))
+                except ModuleBaseException as e:
                     self._fail(f"trigger prototype '{desc}'", e)
 
         # Prune strays — trigger prototypes first (deleting an item prototype
@@ -162,15 +166,15 @@ class Provisioner:
             if d not in want_descs:
                 try:
                     self.api.triggerprototype.delete(t["triggerid"])
-                    print(f"      - pruned stale trigger prototype '{d}'")
-                except Exception as e:  # noqa: BLE001
+                    log.info("- pruned stale trigger prototype '%s'", d)
+                except ModuleBaseException as e:
                     self._fail(f"prune trigger prototype '{d}'", e)
         for k, i in existing.items():
             if k not in want_keys:
                 try:
                     self.api.itemprototype.delete(i["itemid"])
-                    print(f"    - pruned stale item prototype {k}")
-                except Exception as e:  # noqa: BLE001
+                    log.info("- pruned stale item prototype %s", k)
+                except ModuleBaseException as e:
                     self._fail(f"prune item prototype {k}", e)
 
     def _host(self, h, hg_id: str, template_id: str, existing: dict[str, str]) -> None:
@@ -180,7 +184,7 @@ class Provisioner:
                 self.api.host.update(hostid=existing[h.host], name=h.name,
                                      macros=[{"macro": k, "value": v} for k, v in h.macros.items()],
                                      inventory_mode=0 if inv else -1, inventory=inv)
-                print(f"    ~ host {h.host} (data synced)")
+                log.info("~ host %s (data synced)", h.host)
                 return
             self.api.host.create(
                 host=h.host, name=h.name,
@@ -189,16 +193,16 @@ class Provisioner:
                 macros=[{"macro": k, "value": v} for k, v in h.macros.items()],
                 inventory_mode=0 if inv else -1, inventory=inv,
             )
-            print(f"    + host {h.host} ({h.name})")
-        except Exception as e:  # noqa: BLE001
+            log.info("+ host %s (%s)", h.host, h.name)
+        except ModuleBaseException as e:
             self._fail(f"host {h.host}", e)
 
     def ensure_geomap(self) -> None:
         """Make the Geomap widget work out-of-the-box over OpenStreetMap."""
         try:
             self.api.settings.update(geomaps_tile_provider="OpenStreetMap.Mapnik")
-            print("Geomap tile provider set: OpenStreetMap.Mapnik")
-        except Exception as e:  # noqa: BLE001
+            log.info("Geomap tile provider set: OpenStreetMap.Mapnik")
+        except ModuleBaseException as e:
             self._fail("geomap tile provider", e)
 
     def prune(self, assets) -> None:
@@ -216,17 +220,17 @@ class Provisioner:
             if stale:
                 self.api.host.delete(*[h["hostid"] for h in stale])
                 for h in stale:
-                    print(f"  - pruned stale host {h['host']}")
-        except Exception as e:  # noqa: BLE001
+                    log.info("- pruned stale host %s", h["host"])
+        except ModuleBaseException as e:
             self._fail("prune", e)
 
     def apply(self, asset: AssetClass) -> None:
-        print(f"\n[{asset.asset_class}]")
+        log.info("[%s]", asset.asset_class)
         try:
             tg_id = self._templategroup(asset.template_group)
             hg_id = self._hostgroup(asset.host_group)
             template_id = self._template(asset.template_name, tg_id)
-            print(f"  template '{asset.template_name}' ({len(asset.parameters)} params)")
+            log.info("template '%s' (%d params)", asset.template_name, len(asset.parameters))
 
             items = {i["key_"]: i for i in self.api.item.get(
                 templateids=template_id,
@@ -237,7 +241,7 @@ class Provisioner:
             host_names = [h.host for h in asset.hosts]
             hosts = {h["host"]: h["hostid"] for h in self.api.host.get(
                 filter={"host": host_names}, output=["host", "hostid"])}
-        except Exception as e:  # noqa: BLE001
+        except ModuleBaseException as e:
             self._fail(f"{asset.asset_class} (setup)", e)
             return
 
@@ -256,16 +260,16 @@ class Provisioner:
             if d not in want_descs:
                 try:
                     self.api.trigger.delete(t["triggerid"])
-                    print(f"    - pruned stale trigger '{d}'")
-                except Exception as e:  # noqa: BLE001
+                    log.info("- pruned stale trigger '%s'", d)
+                except ModuleBaseException as e:
                     self._fail(f"prune trigger '{d}'", e)
         want_keys = {p.key for p in flat_params}
         for k, i in items.items():
             if k not in want_keys:
                 try:
                     self.api.item.delete(i["itemid"])
-                    print(f"    - pruned stale item {k}")
-                except Exception as e:  # noqa: BLE001
+                    log.info("- pruned stale item %s", k)
+                except ModuleBaseException as e:
                     self._fail(f"prune item {k}", e)
 
         for h in asset.hosts:
@@ -276,7 +280,7 @@ def main() -> None:
     assets = load_all()
     try:
         prov = Provisioner()
-    except Exception as e:  # noqa: BLE001
+    except ModuleBaseException as e:
         raise SystemExit(
             f"Cannot log in to the Zabbix API at {settings.API_URL}: {e}\n"
             f"  - stack not up yet? `make up` (first boot imports the DB, ~30-60s; `make logs`)\n"
@@ -289,12 +293,12 @@ def main() -> None:
     finally:
         prov.close()
     if prov.errors:
-        print(f"\nProvisioning finished with {len(prov.errors)} error(s) — everything else "
-              f"still applied:")
+        log.error("Provisioning finished with %d error(s) — everything else still applied:",
+                  len(prov.errors))
         for e in prov.errors:
-            print(f"  - {e}")
+            log.error("- %s", e)
         raise SystemExit(1)
-    print("\nProvisioning complete. Now run:  make simulate")
+    log.info("Provisioning complete. Now run:  make simulate")
 
 
 if __name__ == "__main__":

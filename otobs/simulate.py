@@ -11,8 +11,10 @@ when disabled: with all of them off, output is identical to the plain state mach
 """
 from __future__ import annotations
 import json
+import logging
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -21,10 +23,12 @@ from .catalog import AssetClass, Parameter, Sim, State, load_all
 from .sim_config import SimConfig, load_sim_config
 
 try:
-    from zoneinfo import ZoneInfo
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     _TZ = ZoneInfo(settings.TIMEZONE)
-except Exception:
+except ZoneInfoNotFoundError:
     _TZ = None
+
+log = logging.getLogger(__name__)
 
 
 def _hour(unix_ts: float) -> float:
@@ -260,7 +264,7 @@ def _note(s: Stream, value) -> str | None:
 
 
 def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
-    from zabbix_utils import ItemValue, Sender
+    from zabbix_utils import ItemValue, ProcessingError, Sender
 
     cfg = cfg or load_sim_config()
     streams = build_streams(assets)
@@ -268,50 +272,55 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
     sender = Sender(server=settings.SENDER_HOST, port=settings.SENDER_PORT)
     scale = max(settings.TIME_SCALE, 0.001)
     feats = ", ".join(cfg.enabled_features()) or "none"
-    print(f"Streaming {len(streams)} items -> {settings.SENDER_HOST}:{settings.SENDER_PORT} "
-          f"(stickiness={settings.STICKINESS}, time_scale={scale}x, sim-config: {feats}). "
-          f"Ctrl+C to stop.")
+    log.info("Streaming %d items -> %s:%d (stickiness=%s, time_scale=%sx, sim-config: %s). "
+             "Ctrl+C to stop.", len(streams), settings.SENDER_HOST, settings.SENDER_PORT,
+             settings.STICKINESS, scale, feats)
 
     lld = discovery_payloads(assets)
     if lld:
         try:
             sender.send([ItemValue(h, k, v) for h, k, v in lld])
-            print(f"Sent {len(lld)} LLD discovery payload(s) — per-port items appear "
-                  f"once the server processes the trap (a few seconds).")
-        except Exception as e:  # noqa: BLE001
-            print(f"discovery send error: {e}")
+            log.info("Sent %d LLD discovery payload(s) — per-port items appear once the "
+                     "server processes the trap (a few seconds).", len(lld))
+        except (ProcessingError, OSError) as e:
+            log.error("discovery send error: %s", e)
 
-    while True:
-        now = time.monotonic()
-        due = [s for s in streams if s.next_due <= now]
-        if not due:
-            time.sleep(0.5)
-            continue
-        hour = _hour(time.time()) if cfg.time_of_day.enabled else 0.0
-        forced = correlation_forces(cfg, by_host)
-        forced.update(segment_forces(assets, by_host))  # hard segment->circuit force wins
-        batch, notes = [], []
-        for s in due:
-            s.next_due = now + s.param.interval_s / scale
-            value = process_stream(s, now, scale, cfg, forced, hour)
-            if value is None:
+    def send_batch(batch: list, notes: list[str]) -> None:
+        """Runs on a worker thread: the trapper round-trip is the slow part of a
+        tick, so it happens off the scheduling loop and next_due stays on-time."""
+        try:
+            resp = sender.send(batch)
+            ok = getattr(resp, "processed", "?")
+            fail = getattr(resp, "failed", "?")
+            tail = ("  | " + ", ".join(notes[:4]) + ("…" if len(notes) > 4 else "")) if notes else ""
+            log.info("sent=%d processed=%s failed=%s%s", len(batch), ok, fail, tail)
+        except (ProcessingError, OSError) as e:
+            log.error("send error: %s", e)
+
+    with ThreadPoolExecutor(max_workers=settings.SIM_SENDER_WORKERS) as executor:
+        while True:
+            now = time.monotonic()
+            due = [s for s in streams if s.next_due <= now]
+            if not due:
+                time.sleep(settings.SIM_POLL_INTERVAL)
                 continue
-            batch.append(ItemValue(s.host, s.send_key, str(value)))
-            n = _note(s, value)
-            if n:
-                notes.append(n)
+            hour = _hour(time.time()) if cfg.time_of_day.enabled else 0.0
+            forced = correlation_forces(cfg, by_host)
+            forced.update(segment_forces(assets, by_host))  # hard segment->circuit force wins
+            batch, notes = [], []
+            for s in due:
+                s.next_due = now + s.param.interval_s / scale
+                value = process_stream(s, now, scale, cfg, forced, hour)
+                if value is None:
+                    continue
+                batch.append(ItemValue(s.host, s.send_key, str(value)))
+                n = _note(s, value)
+                if n:
+                    notes.append(n)
 
-        if batch:
-            try:
-                resp = sender.send(batch)
-                ok = getattr(resp, "processed", "?")
-                fail = getattr(resp, "failed", "?")
-                ts = time.strftime("%H:%M:%S")
-                tail = ("  | " + ", ".join(notes[:4]) + ("…" if len(notes) > 4 else "")) if notes else ""
-                print(f"{ts}  sent={len(batch)} processed={ok} failed={fail}{tail}")
-            except Exception as e:  # noqa: BLE001
-                print(f"send error: {e}")
-        time.sleep(0.5)
+            if batch:
+                executor.submit(send_batch, batch, notes)
+            time.sleep(settings.SIM_POLL_INTERVAL)
 
 
 def _fmt_eta(seconds: float) -> str:
@@ -344,7 +353,7 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     O(n_intervals); degrades to a per-stream scan only if every stream has a
     unique interval, never worse.
     """
-    from zabbix_utils import ItemValue, Sender
+    from zabbix_utils import ItemValue, ProcessingError, Sender
 
     cfg = cfg or load_sim_config()
     days = float(days if days is not None else cfg.backfill.days)
@@ -362,17 +371,17 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
         groups.setdefault(s.param.interval_s, []).append(s)
     group_due = {iv: start for iv in groups}
 
-    print(f"Backfilling {days:g}d for {len(streams)} items at {speed:g}x "
-          f"-> {settings.SENDER_HOST}:{settings.SENDER_PORT} ...")
+    log.info("Backfilling %gd for %d items at %gx -> %s:%d ...",
+             days, len(streams), speed, settings.SENDER_HOST, settings.SENDER_PORT)
 
     lld = discovery_payloads(assets)
     if lld:
         try:  # seed discovery at the window start so per-port items exist first
             sender.send([ItemValue(h, k, v, clock=int(start)) for h, k, v in lld])
-        except Exception as e:  # noqa: BLE001
-            print(f"discovery send error: {e}")
+        except (ProcessingError, OSError) as e:
+            log.error("discovery send error: %s", e)
 
-    FLUSH = 500
+    FLUSH = settings.ZBX_SENDER_BATCH_SIZE
     batch, sent = [], 0
     wall_start = last_print = time.time()
 
@@ -383,8 +392,8 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
         try:
             sender.send(batch)
             sent += len(batch)
-        except Exception as e:  # noqa: BLE001
-            print(f"send error: {e}")
+        except (ProcessingError, OSError) as e:
+            log.error("send error: %s", e)
         batch.clear()
 
     vt = start
@@ -421,14 +430,14 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     _print_progress(1.0, 0.0, sent)
     print()
     day = datetime.fromtimestamp(start, _TZ).date()
-    print(f"Backfill done: {sent} points from {day} to now.")
+    log.info("Backfill done: %d points from %s to now.", sent, day)
 
 
 def main() -> None:
     try:
         run(load_all())
     except KeyboardInterrupt:
-        print("\nKeyboard Interrupted, Thanks For Simulating.")
+        log.info("Keyboard Interrupted, Thanks For Simulating.")
 
 
 if __name__ == "__main__":

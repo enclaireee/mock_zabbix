@@ -159,9 +159,11 @@ def main() -> None:
         from .dashboard import export_main as m; m()
     elif arg == "import-dashboards":
         from .dashboard import import_main as m; m()
+    elif arg == "extract":
+        from .extract import main as m; m(sys.argv[2:])
     else:
         print("usage: python -m otobs {provision|simulate|backfill|config|list|check|"
-              "export-dashboards|import-dashboards}")
+              "export-dashboards|import-dashboards|extract}")
         sys.exit(2)
 
 

@@ -1,40 +1,35 @@
-"""Runnable self-check for the sim_config realism layer. No framework:
-    .venv/bin/python test_sim.py
+"""Pytest suite for the sim_config realism layer and the simulation engine.
 Covers the load-bearing claims: strict no-op when disabled, correlation bias,
-trend ramp, dropout, and sim_config validation. `make check` covers the catalog.
+trend ramp, dropout, hold/MTTR dwell, and per-port discovery fan-out.
+`tests/test_config.py` covers catalog/sim_config validation.
 """
+from __future__ import annotations
 import json
+import math
 import random
+import threading
+from unittest.mock import MagicMock, patch
 
-from otobs.catalog import Parameter, Sim, State
+import pytest
+
+from otobs.catalog import AssetClass, Discovery, Host
+from otobs.simulate import (Stream, sample, next_state, process_stream, build_streams,
+                            discovery_payloads, correlation_forces, segment_forces,
+                            _by_host, _fmt_eta, _idx_of_band, run, run_backfill)
 from otobs.sim_config import (SimConfig, Continuity, Correlation, CorrGroup, Affect,
-                              Trend, Dropout, TodProfile, validate)
-from otobs.simulate import (Stream, sample, next_state, process_stream,
-                            correlation_forces, _by_host, _fmt_eta, run_backfill)
+                              Trend, Dropout, TimeOfDay, TodProfile, Hold)
 
-
-def numsim():
-    return Sim("numeric", [
-        State(0.90, "good", None, 40, 60, 1.5),
-        State(0.08, "underperform", None, 66, 84, 1.5),
-        State(0.02, "failed", None, 86, 99, 1.5),
-    ])
-
-
-def param(key):
-    return Parameter(key, key, "float", "", "1m", "c", "col", "fm", "src", numsim(), [])
+from .conftest import numsim, param
 
 
 def test_disabled_is_identical():
     """All features off => byte-identical value stream to the legacy path."""
     cfg = SimConfig()  # everything off
-    # legacy: next_state + sample, seeded
     random.seed(1234)
     sim, cur, legacy = numsim(), None, []
     for _ in range(300):
         cur = next_state(sim, cur, 0.92)
         legacy.append(sample(sim, sim.states[cur], "float"))
-    # new path via process_stream, same seed
     random.seed(1234)
     s = Stream("h", param("k"))
     new = [process_stream(s, 0.0, 1.0, cfg, {}, 0) for _ in range(300)]
@@ -59,8 +54,7 @@ def test_correlation_biases():
                 hits += 1
         return hits / 400
 
-    grp = CorrGroup("thermal", "fan", "failed",
-                    [Affect("temp", "underperform", 1.0)])
+    grp = CorrGroup("thermal", "fan", "failed", [Affect("temp", "underperform", 1.0)])
     on = underperform_rate(SimConfig(correlation=Correlation(True, [grp])), True)
     off = underperform_rate(SimConfig(), True)
     assert on > off + 0.5, f"correlation had no visible effect (on={on:.2f} off={off:.2f})"
@@ -72,12 +66,10 @@ def test_trend_ramps_not_steps():
     cfg = SimConfig(trend=Trend(True, ramp_seconds=1800))
     s = Stream("H", param("t"), state_idx=0, last_value=50.0)  # was in 'good'
     random.seed(3)
-    # force transition to 'failed' (band [86,99]) at t=ramp_start
     v = process_stream(s, now=100.0, scale=1.0, cfg=cfg,
                        forced={("H", "t"): "failed"}, hour=0)
     assert s.state_idx == 2 and s.ramp_to is not None, "trend did not arm a ramp"
     assert v < 86, f"trend stepped straight into the new band ({v}), no ramp"
-    # midway through the ramp the value should have climbed toward the target
     mid = process_stream(s, now=100.0 + 900.0, scale=1.0, cfg=cfg,
                          forced={("H", "t"): "failed"}, hour=0)
     assert mid > v, f"ramp did not progress ({mid} !> {v})"
@@ -95,15 +87,16 @@ def test_continuity_walks_not_teleports():
         steps.append(abs(v - prev)); vals.append(v); prev = v
     assert max(steps) < 8, f"continuity teleported (max step {max(steps)} >> jitter)"
     assert all(40 <= v <= 60 for v in vals), "walk left the band"
-    # sanity: the legacy path really would teleport far more than this
     random.seed(11)
     legacy = [sample(numsim(), numsim().states[0], "float") for _ in range(80)]
-    assert max(abs(b - a) for a, b in zip(legacy, legacy[1:])) > 8, "test band too narrow to prove a difference"
+    assert max(abs(b - a) for a, b in zip(legacy, legacy[1:])) > 8, \
+        "test band too narrow to prove a difference"
 
 
 def test_continuity_counter_holds():
     """jitter=0 (a fault count / SMART sectors) must HOLD once in a band, not
     bounce across [lo,hi] every tick."""
+    from otobs.catalog import Sim, State, Parameter
     sim = Sim("numeric", [State(0.9, "good", None, 0, 0, 0),
                           State(0.08, "underperform", None, 1, 40, 0),
                           State(0.02, "failed", None, 200, 800, 0)])
@@ -118,15 +111,12 @@ def test_continuity_counter_holds():
 def test_continuity_reversion_and_tod():
     """reversion pulls an analog value to its setpoint (band centre); time_of_day
     shifts that setpoint. This is the 'controlled process variable' realism model."""
-    from otobs.sim_config import Continuity, TimeOfDay, TodProfile
-    # step_scale=0 => no noise, so convergence is deterministic. Band [40,60], centre 50.
     cfg = SimConfig(continuity=Continuity(True, step_scale=0.0, reversion=0.5))
     s = Stream("H", param("k"), state_idx=0, last_value=41.0)
     v = 41.0
     for _ in range(30):
         v = process_stream(s, 0.0, 1.0, cfg, {("H", "k"): "good"}, 0)
     assert abs(v - 50.0) < 1.0, f"reversion did not hold the setpoint (v={v})"
-    # an always-on x1.15 multiplier moves the setpoint to 57.5
     tod = TimeOfDay(True, {"k": TodProfile(0, 24, 1.15, 1.15)})
     cfg2 = SimConfig(continuity=Continuity(True, step_scale=0.0, reversion=0.5), time_of_day=tod)
     s2 = Stream("H", param("k"), state_idx=0, last_value=50.0)
@@ -155,34 +145,6 @@ def test_ramp_hands_off_to_walk():
                              forced={("H", "t"): "failed"}, hour=0)
         assert 86 <= nxt <= 99 and abs(nxt - prev) < 8, "walk did not take over in-band"
         prev = nxt
-
-
-def test_numeric_weights_length_guard():
-    """A 2-entry weights list must fail at load, not silently drop the third band."""
-    from otobs.catalog import _build_sim
-    raw = {"kind": "numeric", "good": [0, 1], "underperform": [1, 2], "failed": [2, 3],
-           "weights": ["good", "underperform"]}
-    try:
-        _build_sim(raw, "x")
-        assert False, "short weights list accepted (band silently dropped)"
-    except ValueError:
-        pass
-
-
-def test_presets_validate_against_catalog():
-    """Every shipped preset must reference only real param keys/bands, so a typo in
-    a mode file is caught here, not at `make config` time."""
-    from otobs.catalog import load_all
-    from otobs.sim_config import load_sim_config_file
-    from otobs.settings import PRESETS_DIR
-    assets = load_all()
-    bands = {p.key: {st.band for st in p.sim.states} for a in assets for p in a.parameters}
-    numeric = {p.key for a in assets for p in a.parameters if p.sim.kind == "numeric"}
-    files = sorted(PRESETS_DIR.glob("*.yml"))
-    assert files, "no presets found"
-    for f in files:
-        # raises on a bad reference or on dead enum-param config
-        validate(load_sim_config_file(f), bands, numeric)
 
 
 def test_dropout():
@@ -220,122 +182,6 @@ def test_tod_shoulder_blend():
     assert empty.multiplier(12) == 0.6
 
 
-def test_validate_rejects_dead_enum_config():
-    """A trend override or ToD profile on an enum param is a silent no-op —
-    with numeric_keys given, validate() must reject it. Dropout stays legal."""
-    from otobs.sim_config import TimeOfDay
-    bands = {"mode": {"good", "failed"}, "temp": {"good", "underperform", "failed"}}
-    numeric = {"temp"}  # "mode" is enum
-    ok = SimConfig(trend=Trend(True, 1800, {"temp": 900}),
-                   time_of_day=TimeOfDay(True, {"temp": TodProfile(8, 17, 1.2, 0.8)}),
-                   dropout=Dropout(True, 0.1, {"mode": 0.0}))
-    validate(ok, bands, numeric)  # numeric targets + enum dropout: all fine
-    for bad in (SimConfig(trend=Trend(True, 1800, {"mode": 900})),
-                SimConfig(time_of_day=TimeOfDay(True, {"mode": TodProfile(8, 17, 1.2, 0.8)}))):
-        try:
-            validate(bad, bands, numeric)
-            assert False, "dead enum-param config accepted"
-        except ValueError as e:
-            assert "enum" in str(e)
-        validate(bad, bands)  # without numeric_keys: old lenient behavior
-
-
-def test_validate_catches_typos():
-    bands = {"fan": {"good", "failed"}, "temp": {"good", "underperform"}}
-    good = SimConfig(correlation=Correlation(
-        True, [CorrGroup("g", "fan", "failed", [Affect("temp", "underperform", 0.5)])]))
-    validate(good, bands)  # no raise
-    bad_param = SimConfig(correlation=Correlation(
-        True, [CorrGroup("g", "nope", "failed", [])]))
-    bad_band = SimConfig(correlation=Correlation(
-        True, [CorrGroup("g", "fan", "on_fire", [])]))
-    for cfg in (bad_param, bad_band):
-        try:
-            validate(cfg, bands)
-            assert False, "validate accepted a bad reference"
-        except ValueError:
-            pass
-
-
-def test_catalog_guards():
-    """The load-time guards: bad interval, all-zero weights, enum band collision,
-    and trigger-field typos all fail loudly at load, not deep in the sim loop."""
-    from otobs.catalog import parse_interval, Sim, State, _build_sim, _build_param
-    for bad in ("0s", "0m", "00s"):               # 0 interval would spin forever
-        try:
-            parse_interval(bad); assert False, f"{bad} accepted"
-        except ValueError:
-            pass
-    assert parse_interval("15s") == 15 and parse_interval("1h") == 3600
-    try:                                            # all-zero weights -> no div/0 later
-        Sim("numeric", [State(0, "good", None, 0, 1, 0)]); assert False
-    except ValueError:
-        pass
-    sim = _build_sim({"kind": "enum",              # numeric-weight enum stays distinct
-                      "states": [{"value": 8, "weight": 3}, {"value": 6, "weight": 1}]}, "x")
-    assert sim.states[0].band != sim.states[1].band, "numeric-weight enum bands collided"
-    try:                                            # bad trigger field -> ValueError
-        _build_param({"key": "k", "name": "n", "value_type": "float", "interval": "5s",
-                      "component": "c", "collection": "c", "failure_mode": "f", "source": "s",
-                      "sim": {"kind": "numeric", "good": [0, 1], "underperform": [1, 2], "failed": [2, 3]},
-                      "triggers": [{"op": ">=", "value": 1, "severity": "warning",
-                                    "label": "l", "bogus": 1}]}, "x")
-        assert False, "bad trigger field accepted"
-    except ValueError:
-        pass
-
-
-def test_provision_isolates_object_failures():
-    """One item/trigger/host that the Zabbix API rejects (e.g. a value_type
-    change on an item with history) must be recorded, not raised — otherwise a
-    single bad object aborts reconciliation of everything still queued behind
-    it. _item/_triggers/_host must never propagate; they log to .errors."""
-    from otobs.provision import Provisioner
-    from otobs.catalog import Parameter, Sim, State, Host, Trigger
-
-    class _NS:
-        def __init__(self, fail=False):
-            self.fail = fail
-            self.calls = 0
-
-        def create(self, **_kw):
-            self.calls += 1
-            if self.fail:
-                raise RuntimeError("rejected by server")
-
-        def update(self, **_kw):
-            self.calls += 1
-            if self.fail:
-                raise RuntimeError("rejected by server")
-
-    class _FakeAPI:
-        def __init__(self, fail=False):
-            self.item = _NS(fail)
-            self.trigger = _NS(fail)
-            self.host = _NS(fail)
-            self.settings = _NS(fail)
-
-    def param(key):
-        sim = Sim("numeric", [State(0.9, "good", None, 0, 1, 0)])
-        trig = [Trigger(">=", 1, "warning", "l")]
-        return Parameter(key, key, "float", "", "1m", "c", "col", "fm", "src", sim, trig)
-
-    prov = Provisioner.__new__(Provisioner)  # skip __init__: no real API login
-    prov.api = _FakeAPI(fail=True)
-    prov.errors = []
-    prov._item("tmpl", param("k"), {})
-    prov._triggers("Template X", param("k"), {})
-    prov._host(Host("H", "H"), "hg", "tmpl", {})
-    prov.ensure_geomap()
-    assert len(prov.errors) == 4, f"expected 4 recorded failures, got {prov.errors}"
-    # And the success path still records nothing.
-    prov2 = Provisioner.__new__(Provisioner)
-    prov2.api = _FakeAPI(fail=False)
-    prov2.errors = []
-    prov2._item("tmpl", param("k"), {})
-    assert prov2.errors == [] and prov2.api.item.calls == 1
-
-
 def test_fmt_eta():
     assert _fmt_eta(0) == "00:00"
     assert _fmt_eta(5) == "00:05"
@@ -348,12 +194,9 @@ def test_backfill_bucket_scheduler_fires_every_due_tick():
     proves the bucketing neither drops nor duplicates a single event: exact
     expected count per stream, mixing streams that share an interval (the
     bucket-grouping path) with streams on staggered intervals (independent
-    ticks), real zabbix send() faked out."""
-    import math
-    import zabbix_utils
-    from otobs.catalog import AssetClass, Host
-
+    ticks), real zabbix send() faked out via unittest.mock."""
     def mk_param(key, interval):
+        from otobs.catalog import Parameter
         return Parameter(key, key, "float", "", interval, "c", "col", "fm", "src", numsim(), [])
 
     intervals = {"a": 5, "b": 5, "c": 7, "d": 11}  # a,b share a bucket; c,d each their own
@@ -361,30 +204,52 @@ def test_backfill_bucket_scheduler_fires_every_due_tick():
                        [mk_param(k, f"{v}s") for k, v in intervals.items()])
 
     sent_counts = []
-
-    class FakeSender:
-        def __init__(self, **_kw):
-            pass
-
-        def send(self, items):
-            sent_counts.append(len(items))
+    fake_sender = MagicMock()
+    fake_sender.send.side_effect = lambda items: sent_counts.append(len(items))
 
     span_s = 97.0  # not evenly divisible by any interval above -> no boundary ambiguity
-    real_sender = zabbix_utils.Sender
-    zabbix_utils.Sender = FakeSender
-    try:
+    with patch("zabbix_utils.Sender", return_value=fake_sender):
         run_backfill([asset], cfg=SimConfig(), days=span_s / 86400.0, speed=1e6)
-    finally:
-        zabbix_utils.Sender = real_sender
 
     expected = sum(math.floor(span_s / iv) + 1 for iv in intervals.values())
     got = sum(sent_counts)
     assert got == expected, f"bucket scheduler lost/duplicated events: got {got}, want {expected}"
 
 
+def test_run_offloads_sends_to_a_worker_thread():
+    """The live loop hands sender.send() to a ThreadPoolExecutor instead of
+    blocking the scheduler on it — the failure mode this guards against is a
+    slow trapper reply stalling process_stream()/next_due on the main thread."""
+    asset = AssetClass("ac", "hg", "tmpl", "tg", [Host("H", "H")], [param("k")])
+
+    send_thread_name = {}
+    fake_sender = MagicMock()
+
+    def fake_send(items):
+        send_thread_name["name"] = threading.current_thread().name
+        return MagicMock(processed=len(items), failed=0)
+
+    fake_sender.send.side_effect = fake_send
+
+    sleep_calls = {"n": 0}
+
+    def fake_sleep(_secs):
+        sleep_calls["n"] += 1
+        if sleep_calls["n"] > 1:  # let exactly one tick (and its submit) happen
+            raise KeyboardInterrupt
+
+    with patch("zabbix_utils.Sender", return_value=fake_sender), \
+         patch("time.sleep", side_effect=fake_sleep):
+        with pytest.raises(KeyboardInterrupt):
+            run([asset], cfg=SimConfig())
+
+    assert fake_sender.send.called, "no batch was ever sent"
+    assert send_thread_name["name"] != "MainThread", \
+        "send() ran on the main thread — I/O is blocking the scheduler again"
+
+
 def _switch_asset():
     """Synthetic switch: 2 per-port prototype params + 1 flat chassis param, 2 hosts."""
-    from otobs.catalog import AssetClass, Host, Discovery
     params = [param("net.if.oper_status"), param("net.if.error_rate"), param("net.env.fan_state")]
     disc = Discovery("net.if.discovery", "Interface discovery",
                      ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"],
@@ -395,7 +260,6 @@ def _switch_asset():
 
 def test_discovery_payload_shape():
     """One LLD trap per host, on the rule key, listing every port under {#IFNAME}."""
-    from otobs.simulate import discovery_payloads
     payloads = discovery_payloads([_switch_asset()])
     assert len(payloads) == 2, "expected one discovery trap per host"
     hosts = {h for h, _, _ in payloads}
@@ -410,7 +274,6 @@ def test_discovery_payload_shape():
 def test_per_port_stream_expansion():
     """Prototype params fan out to one stream per port with a [<port>] send_key;
     the flat chassis param stays bare; every port reuses the base Parameter."""
-    from otobs.simulate import build_streams
     streams = build_streams([_switch_asset()])
     # 2 hosts * (2 protos * 3 ports + 1 flat) = 14
     assert len(streams) == 14, f"got {len(streams)}"
@@ -426,7 +289,6 @@ def test_per_port_stream_expansion():
 
 def test_per_port_streams_run_independently():
     """Each port advances its own state machine and emits under its own key."""
-    from otobs.simulate import build_streams, process_stream
     streams = [s for s in build_streams([_switch_asset()])
                if s.host == "SW-A" and s.param.key == "net.if.error_rate"]
     random.seed(0)
@@ -437,48 +299,11 @@ def test_per_port_streams_run_independently():
         "net.if.error_rate[Gi1/0/1]", "net.if.error_rate[Gi1/0/2]", "net.if.error_rate[Gi1/0/3]"}
 
 
-def test_discovery_validation():
-    from otobs.catalog import _build_discovery
-    pk = {"net.if.oper_status", "net.env.fan_state"}
-    ok = _build_discovery({"key": "net.if.discovery", "name": "d", "ports": ["Gi1/0/1"],
-                           "prototypes": ["net.if.oper_status"]}, pk, "x")
-    assert ok.macro == "{#IFNAME}" and ok.ports == ["Gi1/0/1"]
-    bad = [
-        {"key": "net.if.discovery", "name": "d", "ports": [], "prototypes": ["net.if.oper_status"]},
-        {"key": "net.if.discovery", "name": "d", "ports": ["a", "a"], "prototypes": ["net.if.oper_status"]},
-        {"key": "net.if.discovery", "name": "d", "ports": ["Gi1/0/1"], "prototypes": ["nope"]},
-        {"key": "net.if.oper_status", "name": "d", "ports": ["Gi1/0/1"], "prototypes": ["net.if.oper_status"]},
-        {"key": "net.if.discovery", "name": "d", "ports": ["Gi1/0/1"], "prototypes": ["net.if.oper_status"], "macro": "IFNAME"},
-    ]
-    for b in bad:
-        try:
-            _build_discovery(b, pk, "x"); assert False, f"accepted {b}"
-        except ValueError:
-            pass
-
-
-def test_real_switch_catalog_has_discovery():
-    """The shipped switch catalog marks the four per-port params as prototypes and
-    keeps fan_state flat — the load-bearing schema claim for this feature."""
-    from otobs.catalog import load_all
-    sw = next(a for a in load_all() if "Switch" in a.asset_class)
-    assert sw.discovery is not None
-    assert set(sw.discovery.prototypes) == {
-        "net.if.oper_status", "net.if.admin_status", "net.if.error_rate", "net.if.discards"}
-    assert "net.env.fan_state" not in sw.discovery.prototypes
-    assert len(sw.discovery.ports) >= 2
-
-
-def test_comm_link_segment_derivation():
+def test_comm_link_segment_derivation(assets):
     """A downed physical segment forces EVERY circuit riding it to 'down' together
     (shared-fiber cascade), leaves circuits on healthy segments 'up', and never
     touches independent SCPC circuits. This is the comm-link feature's core claim."""
-    from otobs.catalog import load_all
-    from otobs.simulate import (build_streams, _by_host, segment_forces,
-                                process_stream, _idx_of_band)
-    from otobs.sim_config import SimConfig
-
-    comm = next(a for a in load_all() if a.circuits)
+    comm = next(a for a in assets if a.circuits)
     streams = build_streams([comm])
     by_host = _by_host(streams)
     host = comm.hosts[0].host
@@ -520,8 +345,6 @@ def test_comm_link_segment_derivation():
 def test_hold_dwell_keeps_state_until_expiry():
     """MTTR dwell: once a stream enters a band with a hold window it stays there
     until the window expires, even with stickiness re-rolling and the force gone."""
-    from otobs.simulate import Stream, process_stream
-    from otobs.sim_config import SimConfig, Hold
     cfg = SimConfig(hold=Hold(enabled=True, exact={"k": {"failed": (100.0, 100.0)}}))
     s = Stream("h", param("k"))
     random.seed(0)
@@ -542,8 +365,6 @@ def test_hold_dwell_keeps_state_until_expiry():
 
 def test_hold_disabled_arms_nothing():
     """hold off => hold_until never set, no dwell — the strict no-op guarantee."""
-    from otobs.simulate import Stream, process_stream
-    from otobs.sim_config import SimConfig
     s = Stream("h", param("k"))
     random.seed(0)
     for t in range(50):
@@ -551,20 +372,22 @@ def test_hold_disabled_arms_nothing():
     assert s.hold_until == 0.0
 
 
-def test_comm_link_trigger_tags_scoped_to_down():
+def test_comm_link_trigger_tags_scoped_to_down(assets):
     """Only the high/disaster 'down' trigger of a circuit carries the link tag the
     SLA service matches on — a warning-level VSAT loss must not count as downtime."""
-    from otobs.catalog import load_all
-    comm = next(a for a in load_all() if a.circuits)
+    comm = next(a for a in assets if a.circuits)
     vsat = next(c for c in comm.circuits if not c.depends_on)
     tagged = {t.severity: t.tags for t in vsat.param.triggers}
     assert tagged["high"] == [{"tag": "link", "value": vsat.param.key}]
     assert tagged["warning"] == []
 
 
-if __name__ == "__main__":
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print(f"ok  {name}")
-    print("all sim self-checks passed.")
+def test_real_switch_catalog_has_discovery(assets):
+    """The shipped switch catalog marks the four per-port params as prototypes and
+    keeps fan_state flat — the load-bearing schema claim for this feature."""
+    sw = next(a for a in assets if "Switch" in a.asset_class)
+    assert sw.discovery is not None
+    assert set(sw.discovery.prototypes) == {
+        "net.if.oper_status", "net.if.admin_status", "net.if.error_rate", "net.if.discards"}
+    assert "net.env.fan_state" not in sw.discovery.prototypes
+    assert len(sw.discovery.ports) >= 2

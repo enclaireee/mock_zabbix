@@ -65,6 +65,7 @@ Open **http://localhost:8080** → login **`Admin` / `zabbix`**:
 | `make config` | Select the sim mode (`MODE=realistic\|ml\|stress\|baseline` or `FILE=path.yml`); no arg = status |
 | `make list` | Print the parsed catalog + which sim-config features are on |
 | `make check` | Offline self-test (catalog + generator + sim-config), **no Zabbix needed** |
+| `make extract` | Pull SLA/history/trend data out of Zabbix into CSV/JSON/table (`ARGS="sla --from 7d"`, see [docs/extract-cli.md](docs/extract-cli.md)) |
 
 ## 5. Configuration
 

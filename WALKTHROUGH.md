@@ -23,6 +23,7 @@ topic; this document is the deep, synthesized version. Where they answer
 10. [Design decisions & alternatives considered](#10-design-decisions--alternatives-considered)
 11. [Live demo script](#11-live-demo-script)
 12. [Q&A — likely questions, crisp answers](#12-qa--likely-questions-crisp-answers)
+13. [Auxiliary CLI tools: dashboards & extract](#13-auxiliary-cli-tools-dashboards--extract)
 
 ---
 
@@ -125,9 +126,14 @@ otobs/                   the Python package (stdlib + zabbix_utils + PyYAML)
   ├─ sim_config.py       load + validate sim_config.yml into dataclasses
   ├─ provision.py        Zabbix API reconciler (config plane)
   ├─ simulate.py         state machine + realism + Trapper push (data plane)
-  └─ __main__.py         CLI: provision|simulate|backfill|config|list|check
+  ├─ dashboard.py        export/import hand-built dashboards to dashboard/*.json
+  ├─ extract.py          read-only SLA/history/trend export to CSV/JSON/table (§13)
+  └─ __main__.py         CLI: provision|simulate|backfill|config|list|check|
+                          export-dashboards|import-dashboards|extract
 docs/                    one-topic reference docs (see README's doc map)
 test_sim.py              assert-only self-checks for the sim + loaders
+test_extract.py          assert-only self-checks for the extract CLI (§13.2)
+dashboard/               exported dashboard JSON + _refs.json (id→name map)
 Makefile                 orchestration (`make help`)
 docker-compose.yml       the real Zabbix 7.0 stack
 .env / .env.example      central variables (compose + Python both read it)
@@ -142,6 +148,8 @@ Module responsibilities are strict:
 | `sim_config.py` | realism-feature model + validation | the sampling logic itself (lives in `simulate.py`) |
 | `provision.py` | config plane (API calls) | values, timing, sampling |
 | `simulate.py` | data plane (state machine, sampling, sending) | creating any Zabbix object |
+| `dashboard.py` | dashboard export/import + id↔name remapping | catalog, items, hosts (reads their ids, doesn't manage them) |
+| `extract.py` | read-only history/trend/SLA export | anything that creates/updates/deletes in Zabbix |
 | `__main__.py` | CLI dispatch + offline commands (`list`, `check`, `config`) | business logic |
 
 `provision.py` and `simulate.py` never import each other and share nothing but
@@ -183,6 +191,8 @@ so a typo there must not take down commands that are documented as offline.
 | `config` | `python -m otobs config [MODE or --file FILE]` | mode switcher; no arg = status |
 | `list` | `python -m otobs list` | parsed-catalog sanity view + enabled features |
 | `check` | `python -m otobs check` | full offline self-test, no Zabbix needed |
+| `export-dashboards` / `import-dashboards` | `python -m otobs export-dashboards` / `import-dashboards` | round-trip hand-built dashboards through `dashboard/*.json` (§13.1) |
+| `extract` | `python -m otobs extract $(ARGS)` | read-only SLA/history/trend pull, `ARGS="sla --from 7d"` (§13.2) |
 
 ### The Docker stack
 
@@ -939,7 +949,7 @@ with the `realistic` mode active and `SIM_TIME_SCALE=10`.
 
 ## 8. Testing & validation
 
-Three layers, all offline (no Zabbix required), all fast:
+Four layers, all offline (no Zabbix required), all fast:
 
 1. **`make check`** (`cmd_check`) — parses the whole catalog, then runs the
    *baseline* generator 500× per parameter asserting: values in band (with
@@ -978,6 +988,16 @@ Three layers, all offline (no Zabbix required), all fast:
    its failure-isolation path was verified both with a fake API (above) and
    live, by feeding it a trigger with a deliberately invalid function and
    confirming the other three asset classes still reconciled.
+4. **`test_extract.py`** — same assert-only style, covers the `extract`
+   CLI's (§13.2) pure pieces without a live connection: relative/absolute/
+   `now` date parsing and the `--from < --to` guard; column-name validation;
+   the `history.get` vs `trend.get` decision (numeric-vs-not, short-vs-long
+   range, `--aggregate hourly` override, and the "no trends on this type"
+   fallback); and the cursor-pagination helper against a faked-out `*.get`
+   method, proving a >`_BATCH`-row pull returns every row exactly once. The
+   live paths (`sla.get`/`sla.getsli`/`history.get`/`trend.get` against a
+   real stack) are explicitly out of scope for this file — verify those
+   manually per [docs/extract-cli.md](docs/extract-cli.md).
 
 Why no pytest: the repo's tests are executable specifications, a few asserts
 each; a framework would add a dependency and fixtures for zero additional
@@ -1010,6 +1030,17 @@ active mode over its window, so history and live stream match.
 
 **Reset** — `make down` stops containers, keeps data. `make clean` wipes the
 DB volume: full factory reset, re-run first-boot + provision after.
+
+**Rebuild dashboards after a reset** — `make clean` wipes hand-built
+dashboards along with everything else. `make export-dashboards` (before the
+reset) snapshots them to `dashboard/*.json`; after `make provision` rebuilds
+the catalog, `make import-dashboards` recreates them with ids re-resolved by
+name (§13.1).
+
+**Pull data back out** — `make extract ARGS="sla --from 7d --to now"` for the
+comm-link SLA report, `make extract ARGS="table --host-group '...' --key
+'...'"` for a generic history/trend export. Read-only, no provisioning
+required beyond having data to pull (§13.2).
 
 **Troubleshoot** — the short table in [RUNNING.md §7](RUNNING.md) maps
 symptoms to causes; the two most common: `provision` connection errors (stack
@@ -1224,3 +1255,80 @@ Good/Underperform/Failed labels come free with the series.
 express windowed functions yet — §10.7), per-channel I/O discovery, and any
 scenario scripting. Each has a named trigger condition for when it becomes
 worth building.
+
+---
+
+## 13. Auxiliary CLI tools: dashboards & extract
+
+Two small tools sit alongside provision/simulate/catalog, both strictly
+**read-adjacent** to the core system: neither owns any catalog data or
+Zabbix config-plane object, so neither is in `provision.py`'s or
+`simulate.py`'s MECE split (§2).
+
+### 13.1 Dashboard export/import (`otobs/dashboard.py`)
+
+The comm-link Services/SLA object and the workstation/network/SLA dashboards
+are built **by hand** in the Zabbix UI ([docs/comm-links-sla.md](docs/comm-links-sla.md)) —
+there's nothing in the catalog to provision them from. `make clean` (`docker compose
+down -v`) deletes the DB volume, and with it every hand-built dashboard.
+`export_all()`/`import_all()` make that survivable:
+
+- **Export** (`api.dashboard.get`) writes one JSON file per dashboard to
+  `dashboard/*.json`, plus `dashboard/_refs.json` — every hard object id a
+  widget field points at (host group/host/item/SLA), resolved to its
+  **name** at export time. Ids are meaningless across a `make clean` +
+  reprovision cycle (Zabbix hands out fresh ones); names are stable.
+- **Import** re-resolves each name in `_refs.json` back to whatever id it
+  currently has (`_remap`), rewrites every widget field, and
+  `api.dashboard.create`s the recreated payload. A field whose name no
+  longer resolves (catalog changed since export) is left as the old,
+  now-dead id and counted in a summary — not silently dropped, not a hard
+  failure either, since one stale widget field shouldn't block recreating
+  the other 41.
+- Both are wired the same way as every other Zabbix-touching command:
+  `zabbix_utils.ZabbixAPI` login via `settings.py`, the same
+  connection-error hint text as `provision.py`, `make export-dashboards` /
+  `make import-dashboards`.
+
+Workflow: §9 "Rebuild dashboards after a reset".
+
+### 13.2 Extract (`otobs/extract.py`)
+
+The **read-only** counterpart to provision (config plane, writes) and
+simulate (data plane, writes): `python -m otobs extract sla|table` pulls
+data **out** of Zabbix into CSV/JSON/table files. Every call is a `*.get`
+(`sla.getsli` for the SLA report body) — no `*.create`/`*.update`/`*.delete`
+anywhere in the module. Full reference: [docs/extract-cli.md](docs/extract-cli.md).
+
+**One engine, two subcommands** (mirrors `dashboard.py`'s
+export/import-share-helpers shape, not a multi-file split): date-range
+parsing (`resolve_range`, accepting `now`/`Nd`/`Nh`/absolute ISO), the
+Zabbix connect helper, a cursor-paginated `history.get`/`trend.get` fetcher,
+and the csv/json/table writer are all shared.
+
+- **`extract sla`** — resolves the one comm-link SLA object (or requires
+  `--sla-name` if several exist), calls `sla.getsli` over the requested
+  window, resolves service ids to names via `service.get`, and emits one row
+  per service × period (SLA %, uptime, downtime, excluded time). `--period`
+  is a sanity check only, not a passthrough — Zabbix computes `getsli`'s
+  granularity from the SLA object's own configured `period`; a mismatch
+  prints a note instead of silently reporting the wrong thing.
+- **`extract table`** — filters items by host group / host / a `key_`
+  pattern (native Zabbix `search` + `searchWildcardsEnabled`, no hand-rolled
+  glob) / tag, then auto-picks `history.get` (full precision) vs
+  `trend.get` (hourly aggregate, numeric items only) per value-type group:
+  `--aggregate hourly`, or a range past a 7-day threshold, switches to
+  trend; the choice and its reason are always printed, never silent.
+  `--columns` selects from a small fixed vocabulary (`timestamp, clock,
+  host, item, key, value, units, value_type`).
+- **Pagination**: `history.get`/`trend.get` have no offset pagination, so
+  the fetcher cursors on `clock` in pages of 5000, advancing to
+  `last_clock + 1` between pages — `# ponytail:`-documented as safe at this
+  lab's scale (catalog intervals ≥5s, a few hundred streams; no clock-second
+  ever produces >5000 rows) and not safe at arbitrary scale (would need a
+  `(clock, ns)` cursor).
+- Same connection-error hint pattern as `provision.py`/`dashboard.py`; zero
+  matching rows prints an explicit message instead of writing an empty file.
+
+Tested offline in `test_extract.py` (§8, layer 4); the live API paths are
+manually verified, not covered by the automated suite (§8).

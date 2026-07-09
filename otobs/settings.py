@@ -1,5 +1,6 @@
 """Central config: read .env once, expose typed settings. No python-dotenv dep."""
 from __future__ import annotations
+import logging
 import os
 from pathlib import Path
 
@@ -49,3 +50,11 @@ STICKINESS = _f("SIM_STICKINESS", 0.92)
 TIME_SCALE = _f("SIM_TIME_SCALE", 10.0)
 
 TIMEZONE = os.environ.get("ZBX_TIMEZONE", "UTC")
+
+SIM_POLL_INTERVAL = _f("SIM_POLL_INTERVAL", 0.5)  # live loop: sleep between due-checks
+SIM_SENDER_WORKERS = _i("SIM_SENDER_WORKERS", 4)  # thread pool size for trapper sends
+ZBX_SENDER_BATCH_SIZE = _i("ZBX_SENDER_BATCH_SIZE", 500)  # backfill: points per trapper send
+
+LOG_LEVEL = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+                    datefmt="%H:%M:%S")

@@ -42,10 +42,16 @@ list: venv ## Print the parsed catalog (sanity view)
 check: venv ## Run the self-check (catalog + generator), no Zabbix needed
 	$(PY) -m otobs check
 
+test: venv ## Run the pytest suite (offline; catalog, sim engine, provisioning logic)
+	$(PY) -m pytest tests/ -q
+
 export-dashboards: venv ## Export live Zabbix dashboards to dashboard/*.json
 	$(PY) -m otobs export-dashboards
 
 import-dashboards: venv ## Recreate dashboard/*.json into Zabbix (run after make provision)
 	$(PY) -m otobs import-dashboards
 
-.PHONY: help venv up down clean logs provision simulate backfill config list check export-dashboards import-dashboards
+extract: venv ## Pull data out of Zabbix: sla|table report (ARGS="sla --from 7d --to now")
+	$(PY) -m otobs extract $(ARGS)
+
+.PHONY: help venv up down clean logs provision simulate backfill config list check test export-dashboards import-dashboards extract
