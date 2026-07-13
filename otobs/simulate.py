@@ -467,14 +467,12 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     while group_due and vt < end:
         hour = _hour(vt) if cfg.time_of_day.enabled else 0.0
         forced = correlation_forces(cfg, by_host)
-        forced.update(segment_forces(assets, by_host))  # hard segment->circuit force wins
+        forced.update(segment_forces(assets, by_host))  
         for iv, due_t in group_due.items():
             if due_t > vt:
                 continue
             group_due[iv] = due_t + iv
             for s in groups[iv]:
-                # vt is real historical Unix time already (unlike the live loop's
-                # monotonic `now`), so it doubles as `clock` for weather streams.
                 value = process_stream(s, vt, 1.0, cfg, forced, hour, vt)
                 if value is not None:
                     batch.append(ItemValue(s.host, s.send_key, str(value), clock=int(vt)))
