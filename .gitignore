@@ -5,3 +5,4 @@ __pycache__/
 zbx_db_data/
 *.csv
 notebook.ipynb
+*.xlsx
