@@ -105,6 +105,57 @@ curves are exactly what predictive-maintenance models train on), **Failed**
 (function lost, high-severity triggers fire). §5 explains the machine; §3
 explains how each parameter defines its bands.
 
+### The whole system as a flowchart
+
+```mermaid
+flowchart TD
+    subgraph SRC["Single source of truth (git)"]
+        CAT["catalog/*.yml + sites.yml<br/>each parameter & station defined ONCE"]
+        SIMCFG["sim_config.yml<br/>realism config (via make config → presets/)"]
+        WX["weather_engine.py<br/>deterministic weather (omega mode)"]
+    end
+
+    subgraph CONFIG["Config plane — what to monitor & when to alert"]
+        PROV["otobs.provision"]
+    end
+
+    subgraph DATA["Data plane — measured values over time"]
+        SIM["otobs.simulate<br/>sticky Good / Underperform / Failed<br/>state machine (+ backfill)"]
+    end
+
+    CAT --> PROV
+    CAT --> SIM
+    SIMCFG --> SIM
+    WX --> SIM
+
+    PROV -->|"JSON-RPC API :8080<br/>templates, items, triggers, hosts"| ZBX
+    SIM -->|"Trapper push :10051<br/>time-series values"| ZBX
+
+    subgraph ZBX["Zabbix 7.0 stack (docker compose)"]
+        SERVER["Server + Trapper :10051"]
+        WEB["Web / API :8080"]
+        PG["Postgres 16"]
+        AGENT["Agent 2 (self-monitor)"]
+        SERVER --> PG
+        WEB --> PG
+        AGENT --> SERVER
+    end
+
+    ZBX --> TRIG["Triggers fire<br/>(Good→Underperform→Failed)"]
+    TRIG --> DASH["Dashboards · Geomap · SLA services"]
+    ZBX --> EXTRACT["otobs.extract<br/>read-only SLA/history/trend export"]
+    EXTRACT --> CSV["CSV / JSON"]
+    CSV --> ML["Tahap 2/3<br/>clustering & predictive maintenance"]
+
+    PROD["Production swap:<br/>change item type Trapper → SNMP/Agent<br/>config plane stays byte-for-byte identical"] -.replaces.-> SIM
+```
+
+Read it as the two planes meeting inside Zabbix: the catalog feeds **both**
+`provision` (config plane, built once, identical to production) and `simulate`
+(data plane, the only thing that changes when you go live). Everything
+downstream — triggers, dashboards, SLA, and the extracted CSV that Tahap 2/3
+trains on — hangs off the values landing in Zabbix.
+
 ---
 
 ## 2. Repository layout, file by file
