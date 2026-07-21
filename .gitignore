@@ -6,3 +6,4 @@ zbx_db_data/
 *.csv
 notebook.ipynb
 *.xlsx
+data_project/
