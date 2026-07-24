@@ -1,0 +1,147 @@
+Dataset validation report — preset=ml180
+File: data_project/pdm_180d.csv  (22314 data rows)
+Generated: 2026-07-23 15:09
+Hosts (3): HMI-BJN-WW01, HMI-GRS-WW01, HMI-TBB-WW01
+Keys  (10): hmi.cpu.temp, hmi.cpu.util, hmi.disk.free, hmi.fan.rpm, hmi.mem.available, hmi.nic.errors, hmi.nic.oper_state, hmi.psu.rail_12v, hmi.smart.health_passed, hmi.smart.realloc_sectors
+
+Observed row spacing (median): 1.00 h per (host,key) series
+!! HMI catalog keys ABSENT from the extract: ['hmi.maintenance']
+!! hmi.maintenance is missing — every invariant conditioned on the repair marker is UNCHECKABLE as specified; raw counts are reported instead.
+
+========================================================================
+PHYSICS INVARIANTS (must be zero at native resolution — see caveat)
+========================================================================
+Caveat: rows are hourly aggregates. Checks are EXACT only for keys whose native interval >= row spacing; for faster keys they are advisory.
+hmi.smart.realloc_sectors @ HMI-BJN-WW01: decreases marker missing — all decreases: 46
+    2026-06-23 03:00 33 -> 2026-06-23 04:00 28
+    2026-06-23 04:00 28 -> 2026-06-23 05:00 22
+    2026-06-23 05:00 22 -> 2026-06-23 06:00 16
+hmi.smart.realloc_sectors @ HMI-GRS-WW01: decreases marker missing — all decreases: 24
+    2026-07-03 03:00 25 -> 2026-07-03 04:00 21
+    2026-07-03 04:00 21 -> 2026-07-03 05:00 17
+    2026-07-03 05:00 17 -> 2026-07-03 06:00 12
+hmi.smart.realloc_sectors @ HMI-TBB-WW01: decreases marker missing — all decreases: 25
+    2026-06-26 06:00 6 -> 2026-06-26 07:00 5
+    2026-06-26 07:00 5 -> 2026-06-26 08:00 4
+    2026-06-26 08:00 4 -> 2026-06-26 09:00 3
+
+hmi.cpu.temp [advisory (native interval < row spacing)]: good->failed single-step: 0; failed->good (marker missing): 0
+hmi.cpu.util [advisory (native interval < row spacing)]: good->failed single-step: 0; failed->good (marker missing): 0
+hmi.disk.free [advisory (native interval < row spacing)]: good->failed single-step: 1; failed->good (marker missing): 3
+    HMI-TBB-WW01 07-19 15:00 20.3011(good) -> 07-19 16:00 3.94025(failed)
+hmi.fan.rpm [advisory (native interval < row spacing)]: good->failed single-step: 0; failed->good (marker missing): 0
+hmi.mem.available [advisory (native interval < row spacing)]: good->failed single-step: 0; failed->good (marker missing): 0
+hmi.nic.errors [advisory (native interval < row spacing)]: good->failed single-step: 7; failed->good (marker missing): 0
+    HMI-BJN-WW01 06-21 13:00 0(good) -> 06-21 14:00 202(failed)
+    HMI-BJN-WW01 06-28 02:00 0(good) -> 06-28 03:00 120(failed)
+    HMI-BJN-WW01 06-28 09:00 0(good) -> 06-28 10:00 228(failed)
+hmi.nic.oper_state [advisory (native interval < row spacing)]: good->failed single-step: 134; failed->good (marker missing): 135
+    HMI-BJN-WW01 06-21 21:00 1(good) -> 06-21 22:00 0(failed)
+    HMI-BJN-WW01 06-22 00:00 1(good) -> 06-22 01:00 0(failed)
+    HMI-BJN-WW01 06-22 21:00 1(good) -> 06-22 22:00 0(failed)
+hmi.psu.rail_12v [advisory (native interval < row spacing)]: good->failed single-step: 7; failed->good (marker missing): 5
+    HMI-BJN-WW01 06-27 04:00 11.7579(good) -> 06-27 05:00 11.1728(failed)
+    HMI-BJN-WW01 07-08 14:00 11.73(good) -> 07-08 15:00 11.2855(failed)
+    HMI-BJN-WW01 07-15 15:00 11.7421(good) -> 07-15 16:00 11.2972(failed)
+hmi.smart.health_passed [EXACT]: good->failed single-step: 1; failed->good (marker missing): 1
+    HMI-GRS-WW01 07-07 01:00 1(good) -> 07-07 02:00 0(failed)
+hmi.smart.realloc_sectors [EXACT]: good->failed single-step: 0; failed->good (marker missing): 0
+
+========================================================================
+EVENT STRUCTURE (reported, not judged)
+========================================================================
+Onset count (transitions into failed) per host/parameter:
+  HMI-BJN-WW01: disk.free=1, nic.errors=12, nic.oper_state=49, psu.rail_12v=6, smart.realloc_sectors=2
+    total=70
+  HMI-GRS-WW01: disk.free=3, nic.errors=11, nic.oper_state=40, smart.health_passed=1
+    total=55
+  HMI-TBB-WW01: disk.free=2, nic.errors=11, nic.oper_state=46, psu.rail_12v=4, smart.realloc_sectors=1
+    total=64
+
+Episode duration (hours) per parameter [min/p25/med/p75/max] (n, censored):
+  hmi.disk.free: 1/1/1/1/2  (n=6, censored=0)
+  hmi.nic.errors: 1/1/2/2/4  (n=34, censored=0)
+  hmi.nic.oper_state: 1/1/1/2/3  (n=135, censored=0)
+  hmi.psu.rail_12v: 1/1/2/3/6  (n=10, censored=0)
+  hmi.smart.health_passed: 8/8/8/8/8  (n=1, censored=0)
+  hmi.smart.realloc_sectors: 9/16/23/27/31  (n=3, censored=0)
+  ALL: 1/1/1/2/31  (n=189)
+
+Fraction of host-hours failed per parameter (and share of all failed hours):
+  hmi.cpu.temp:  0.00% failed-time, share   0.0%
+  hmi.cpu.util:  0.00% failed-time, share   0.0%
+  hmi.disk.free:  0.31% failed-time, share   2.1%
+  hmi.fan.rpm:  0.00% failed-time, share   0.0%
+  hmi.mem.available:  0.00% failed-time, share   0.0%
+  hmi.nic.errors:  2.60% failed-time, share  17.4%
+  hmi.nic.oper_state:  7.67% failed-time, share  51.4%  << >40% OF ALL FAILED HOURS
+  hmi.psu.rail_12v:  1.16% failed-time, share   7.8%
+  hmi.smart.health_passed:  0.36% failed-time, share   2.4%
+  hmi.smart.realloc_sectors:  2.84% failed-time, share  18.9%
+  OVERALL: 1.49% of stream host-hours failed
+  Host-hours with ANY failed stream: 319/2226 (14.3%)
+
+Maintenance visits:
+  HMI-BJN-WW01: marker missing — 69 inferred repair tick(s) (any failed->good heal)
+  HMI-GRS-WW01: marker missing — 55 inferred repair tick(s) (any failed->good heal)
+  HMI-TBB-WW01: marker missing — 64 inferred repair tick(s) (any failed->good heal)
+  Routine-visit and reactive-dispatch counts: UNCHECKABLE without the marker.
+
+========================================================================
+DATA INTEGRITY
+========================================================================
+  HMI-BJN-WW01: 2026-06-21 13:00 .. 2026-07-22 10:00
+  HMI-GRS-WW01: 2026-06-21 13:00 .. 2026-07-22 10:00
+  HMI-TBB-WW01: 2026-06-21 13:00 .. 2026-07-22 10:00
+  Total span: 30.9 days
+
+Gap analysis (interval > 2x the series' median spacing):
+  none
+
+Null/missing counts per column:
+  units: 6665
+
+========================================================================
+ALREADY-FAILED CONTAMINATION (host already failed at t AND at t+H)
+========================================================================
+  H=  2h: already-failed contamination = 105/2220 rows (4.7%)
+  H= 12h: already-failed contamination = 69/2190 rows (3.2%)
+  H= 24h: already-failed contamination = 52/2154 rows (2.4%)
+  H= 72h: already-failed contamination = 35/2010 rows (1.7%)
+  H=168h: already-failed contamination = 35/1722 rows (2.0%)
+  (label: rows failed at t that are STILL failed at t+H — these rows make a
+   'state at t+H' target trivially predictable from current state)
+
+========================================================================
+ADDENDUM — ROOT-CAUSE ANALYSIS (validator run stopped here per Phase 0 gate)
+========================================================================
+VERDICT: this file is NOT the output of the ml180 preset as claimed.
+
+Evidence:
+1. Span is 30.9 days (2026-06-21 .. 2026-07-22), not 180 days. All hosts
+   share identical bounds, so this is the whole window that exists — not
+   per-host front-truncation.
+2. hmi.maintenance is absent: the item was never provisioned when this
+   extract was made (the parameter is an uncommitted working-tree addition
+   to catalog/workstation_hmi.yml).
+3. 95 monotonic decreases on hmi.smart.realloc_sectors, all GRADUAL hourly
+   declines (e.g. 33->28->22->16), which is the pre-clamp downward trend
+   ramp. Current working-tree code clamps this path and its unit test passes.
+4. 135 failed->good heals on hmi.nic.oper_state with median episode 1h,
+   and sub-day episodes on nic.errors/psu — impossible under absorbing
+   failure + dispatch [1d,3d]. This is the OLD self-healing state machine.
+5. Committed code at HEAD (6d07ce5, 2026-07-13) contains none of the ml180
+   machinery (no MaintenanceCrew, no ladder, no monotonic flag in
+   catalog.py); the ml180 overhaul exists only as uncommitted changes.
+   The CSV (mtime 2026-07-22) was generated against Zabbix data produced
+   before/without those mechanics.
+
+The current simulation code itself shows no invariant bug: all 58 offline
+tests pass, including monotonic-clamp, ladder, and absorbing-failure tests.
+The violated invariants are properties of the STALE DATA, not the engine.
+
+Also noted: hmi.smart.health_passed is a 2-state enum (good/failed, no
+underperform band), so a single-step good->failed is LEGAL for it — the
+ladder cannot forbid a jump when no intermediate band exists. If a
+prodrome is wanted for disk health, the catalog needs an underperform
+state for that key (human decision).

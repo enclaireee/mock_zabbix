@@ -50,8 +50,12 @@ class Provisioner:
             self.api.template.create(host=name, groups=[{"groupid": tg_id}])["templateids"][0]
 
     def _item(self, template_id: str, p: Parameter, existing: dict[str, dict]) -> None:
+        # history >= the longest backfill window (180d) — the trapper rejects
+        # values older than an item's history retention, silently truncating
+        # long backfills to whatever the Zabbix default (90d) allows.
         want = {"name": p.name, "value_type": p.value_type_code,
-                "units": p.units, "description": p.description()}
+                "units": p.units, "description": p.description(),
+                "history": "400d"}
         got = existing.get(p.key)
         try:
             if got is None:

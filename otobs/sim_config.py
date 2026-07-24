@@ -156,6 +156,39 @@ class Hold:
 
 
 @dataclass
+class Progression:
+    """ladder=True: a re-roll moves one band toward the rolled target instead of
+    teleporting — good <-> underperform <-> failed. No jump straight to failed,
+    no instant heal past underperform. Off = the original memoryless machine."""
+    ladder: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        return self.ladder
+
+
+@dataclass
+class Maintenance:
+    """Routine site visits. When enabled, `failed` is ABSORBING — no stream
+    self-heals out of it; every `interval` (± uniform jitter) per host, a visit
+    forces all failed streams on that host back to good at once (one tech trip
+    fixes everything). First visits are staggered across one interval so hosts
+    don't all repair simultaneously. `event_key` names a catalog parameter that
+    emits 1 on the reading after a visit (a CMMS work-order marker), 0 otherwise.
+
+    `dispatch` (optional [lo, hi] window): reactive repair — a host with a failed
+    stream gets an unscheduled visit uniform(lo, hi) after the failure appears,
+    instead of waiting up to a full routine interval. Without it, routine-only
+    repair makes every failure dwell ~interval/2, which either saturates a
+    failure label or forces failures so rare a model has nothing to learn from."""
+    enabled: bool = False
+    interval_s: float = 15 * 86400.0
+    jitter_s: float = 0.0
+    event_key: str | None = None
+    dispatch: tuple | None = None  # (lo_s, hi_s) reactive-repair window
+
+
+@dataclass
 class Backfill:
     enabled: bool = False
     days: float = 14.0
@@ -170,12 +203,15 @@ class SimConfig:
     time_of_day: TimeOfDay = field(default_factory=TimeOfDay)
     dropout: Dropout = field(default_factory=Dropout)
     hold: Hold = field(default_factory=Hold)
+    progression: Progression = field(default_factory=Progression)
+    maintenance: Maintenance = field(default_factory=Maintenance)
     backfill: Backfill = field(default_factory=Backfill)
 
     def enabled_features(self) -> list[str]:
         pairs = (("continuity", self.continuity), ("correlation", self.correlation),
                  ("trend", self.trend), ("time_of_day", self.time_of_day),
                  ("dropout", self.dropout), ("hold", self.hold),
+                 ("ladder", self.progression), ("maintenance", self.maintenance),
                  ("backfill", self.backfill))
         return [name for name, f in pairs if f.enabled]
 
@@ -283,6 +319,22 @@ def _hold(raw: dict) -> Hold:
     return Hold(bool(raw.get("enabled", False)), exact, prefixes)
 
 
+def _progression(raw: dict) -> Progression:
+    return Progression(bool(raw.get("ladder", False)))
+
+
+def _maintenance(raw: dict) -> Maintenance:
+    interval = _dur(raw.get("interval", "15d"), "maintenance.interval")
+    jitter = _dur(raw["jitter"], "maintenance.jitter") if "jitter" in raw else 0.0
+    if jitter >= interval:
+        raise ValueError(f"maintenance.jitter={jitter}s must be < interval={interval}s")
+    ek = raw.get("event_key")
+    if ek is not None and not isinstance(ek, str):
+        raise ValueError(f"maintenance.event_key must be a string, got {ek!r}")
+    dispatch = _window(raw["dispatch"], "maintenance.dispatch") if "dispatch" in raw else None
+    return Maintenance(bool(raw.get("enabled", False)), interval, jitter, ek, dispatch)
+
+
 def _backfill(raw: dict) -> Backfill:
     return Backfill(bool(raw.get("enabled", False)),
                     _num(raw, "days", 14.0, "backfill", 0.001),
@@ -297,6 +349,8 @@ def _parse(raw: dict) -> SimConfig:
         time_of_day=_tod(raw.get("time_of_day") or {}),
         dropout=_dropout(raw.get("dropout") or {}),
         hold=_hold(raw.get("hold") or {}),
+        progression=_progression(raw.get("progression") or {}),
+        maintenance=_maintenance(raw.get("maintenance") or {}),
         backfill=_backfill(raw.get("backfill") or {}),
     )
 
@@ -353,6 +407,8 @@ def validate(cfg: SimConfig, param_bands: dict[str, set],
     for key, bm in cfg.hold.exact.items():
         for band in bm:
             need_band(key, band, "hold.overrides")
+    if cfg.maintenance.event_key is not None:
+        need_param(cfg.maintenance.event_key, "maintenance.event_key")
     for pfx, bm in cfg.hold.prefixes:
         matched = [k for k in param_bands if k.startswith(pfx)]
         if not matched:

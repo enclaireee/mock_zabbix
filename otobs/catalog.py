@@ -9,7 +9,7 @@ from .settings import CATALOG_DIR
 
 DEFAULT_WEIGHTS = {"good": 0.90, "underperform": 0.08, "failed": 0.02}
 
-_INTERVAL_UNITS = {"s": 1, "m": 60, "h": 3600}
+_INTERVAL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 VALUE_TYPE_CODE = {"float": 0, "char": 1, "log": 2, "unsigned": 3, "text": 4}
 SEVERITY_CODE = {
@@ -19,8 +19,8 @@ SEVERITY_CODE = {
 
 
 def parse_interval(s: str) -> int:
-    """'15s' -> 15, '5m' -> 300, '1h' -> 3600. Must be > 0 (a 0 interval would
-    make the backfill scheduler and live loop spin forever)."""
+    """'15s' -> 15, '5m' -> 300, '1h' -> 3600, '15d' -> 1296000. Must be > 0 (a 0
+    interval would make the backfill scheduler and live loop spin forever)."""
     s = str(s).strip()
     unit = _INTERVAL_UNITS.get(s[-1:])
     if unit is None or not s[:-1].isdigit():
@@ -70,6 +70,9 @@ class Trigger:
 class Sim:
     kind: str
     states: list[State]
+    # Counter that never decreases in real life (e.g. SMART reallocated sectors).
+    # The simulator clamps it non-decreasing; only a maintenance repair resets it.
+    monotonic: bool = False
 
     def __post_init__(self):
         total = sum(s.weight for s in self.states)
@@ -195,7 +198,7 @@ def _build_sim(raw: dict, where: str) -> Sim:
             states.append(State(weight=_weight(w), band=band,
                                  lo=float(lo), hi=float(hi),
                                  jitter=float(raw.get("jitter", 0.0))))
-        return Sim(kind, states)
+        return Sim(kind, states, monotonic=bool(raw.get("monotonic", False)))
     raise ValueError(f"{where}: bad sim.kind {kind!r} (numeric|enum)")
 
 

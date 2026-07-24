@@ -135,7 +135,7 @@ def test_omega_preset_validates_against_the_real_catalog():
     bands = {p.key: {st.band for st in p.sim.states} for a in assets for p in a.parameters}
     numeric = {p.key for a in assets for p in a.parameters if p.sim.kind == "numeric"}
     cfg = load_sim_config_file(ROOT / "presets" / "omega.yml")
-    validate(cfg, bands, numeric)  # raises on any bad param/band reference
+    validate(cfg, bands, numeric)  
     assert cfg.enabled_features() == ["correlation", "trend", "dropout"]
 
 

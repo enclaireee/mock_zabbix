@@ -53,7 +53,7 @@ def test_validate_catches_typos(bad_cfg_kwargs):
     bands = {"fan": {"good", "failed"}, "temp": {"good", "underperform"}}
     good = SimConfig(correlation=Correlation(
         True, [CorrGroup("g", "fan", "failed", [Affect("temp", "underperform", 0.5)])]))
-    validate(good, bands)  # no raise
+    validate(good, bands) 
     bad = SimConfig(correlation=Correlation(
         True, [CorrGroup("g", bad_cfg_kwargs["trigger_param"],
                          bad_cfg_kwargs["trigger_band"], [])]))

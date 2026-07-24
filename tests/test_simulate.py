@@ -22,8 +22,10 @@ from otobs.sim_config import (SimConfig, Continuity, Correlation, CorrGroup, Aff
 from .conftest import numsim, param
 
 
-def test_disabled_is_identical():
+def test_disabled_is_identical(monkeypatch):
     """All features off => byte-identical value stream to the legacy path."""
+    from otobs import settings
+    monkeypatch.setattr(settings, "STICKINESS", 0.92)  # pin: .env must not sway parity
     cfg = SimConfig()  # everything off
     random.seed(1234)
     sim, cur, legacy = numsim(), None, []
@@ -436,3 +438,97 @@ def test_real_switch_catalog_has_discovery(assets):
         "net.if.oper_status", "net.if.admin_status", "net.if.error_rate", "net.if.discards"}
     assert "net.env.fan_state" not in sw.discovery.prototypes
     assert len(sw.discovery.ports) >= 2
+
+
+def test_ladder_steps_one_band_at_a_time():
+    """progression.ladder: a re-roll moves one band toward the target — never a
+    good->failed teleport, never an instant failed->good heal."""
+    sim = numsim()
+    random.seed(2)
+    from_good = {next_state(sim, 0, 0.0, None, True) for _ in range(2000)}
+    assert from_good == {0, 1}, f"ladder let good jump past underperform: {from_good}"
+    from_failed = {next_state(sim, 2, 0.0, None, True) for _ in range(2000)}
+    assert from_failed == {1, 2}, f"ladder let failed heal past underperform: {from_failed}"
+
+
+def test_maintenance_absorbing_then_repair():
+    """With maintenance on, failed never self-heals; the scheduled visit forces
+    every failed stream on the host back to good and re-arms the schedule."""
+    from otobs.sim_config import Maintenance
+    from otobs.simulate import MaintenanceCrew
+    cfg = SimConfig(maintenance=Maintenance(enabled=True, interval_s=1000.0))
+    s = Stream("H", param("k"), state_idx=2, last_value=90.0)  # in 'failed'
+    bh = _by_host([s])
+    crew = MaintenanceCrew(cfg, bh, start=0.0)
+    crew.next_visit["H"] = 500.0  # pin the schedule
+    random.seed(9)
+    for t in range(0, 500, 50):
+        forced = crew.forces(bh, float(t))
+        assert forced == {}, "crew visited early"
+        process_stream(s, float(t), 1.0, cfg, forced, 0)
+        assert s.param.sim.states[s.state_idx].band == "failed", "failed self-healed while absorbing"
+    forced = crew.forces(bh, 500.0)
+    assert forced == {("H", "k"): "good"}, f"visit did not repair: {forced}"
+    process_stream(s, 500.0, 1.0, cfg, forced, 0)
+    assert s.param.sim.states[s.state_idx].band == "good"
+    assert crew.next_visit["H"] == 1500.0, "schedule not re-armed (jitter=0)"
+
+
+def test_monotonic_counter_only_resets_on_repair():
+    """A monotonic counter (SMART sectors) never decreases while self-rolling;
+    a forced 'good' (maintenance repair = disk swap) resets it instantly."""
+    from otobs.catalog import Sim, State, Parameter
+    from otobs.sim_config import Maintenance
+    sim = Sim("numeric", [State(0.9, "good", None, 0, 0, 0),
+                          State(0.08, "underperform", None, 1, 40, 0),
+                          State(0.02, "failed", None, 200, 800, 0)], monotonic=True)
+    p = Parameter("io", "io", "unsigned", "", "1h", "c", "col", "fm", "src", sim, [])
+    cfg = SimConfig(maintenance=Maintenance(enabled=True))
+    s = Stream("H", p, state_idx=1, last_value=25.0)
+    random.seed(6)
+    prev = 25.0
+    for _ in range(200):  # self-rolling: whatever bands it wanders, never a decrease
+        v = process_stream(s, 0.0, 1.0, cfg, {}, 0)
+        assert v >= prev, f"monotonic counter decreased: {prev} -> {v}"
+        prev = v
+    v = process_stream(s, 0.0, 1.0, cfg, {("H", "io"): "good"}, 0)  # repair
+    assert v == 0, f"repair should reset the counter to the good band, got {v}"
+
+
+def test_maintenance_event_marker():
+    """The event_key stream is crew-driven: 0 normally, 1 on the first reading
+    after a visit, back to 0 once the reading window has passed."""
+    from otobs.sim_config import Maintenance
+    from otobs.simulate import MaintenanceCrew
+    cfg = SimConfig(maintenance=Maintenance(enabled=True, interval_s=1000.0,
+                                            event_key="k"))
+    s = Stream("H", param("k"))  # interval 1m -> 60s reading window
+    bh = _by_host([s])
+    crew = MaintenanceCrew(cfg, bh, start=0.0)
+    crew.next_visit["H"] = 100.0
+    assert process_stream(s, 0.0, 1.0, cfg, {}, 0, None, crew) == 0
+    crew.forces(bh, 100.0)  # the visit
+    assert process_stream(s, 100.0, 1.0, cfg, {}, 0, None, crew) == 1
+    assert process_stream(s, 200.0, 1.0, cfg, {}, 0, None, crew) == 0
+
+
+def test_maintenance_reactive_dispatch():
+    """With a dispatch window, a failure triggers an unscheduled repair inside
+    [lo, hi] — long before the routine visit — and the visit marker still pings."""
+    from otobs.sim_config import Maintenance
+    from otobs.simulate import MaintenanceCrew
+    cfg = SimConfig(maintenance=Maintenance(enabled=True, interval_s=100000.0,
+                                            dispatch=(100.0, 200.0)))
+    s = Stream("H", param("k"), state_idx=2, last_value=90.0)  # failed
+    bh = _by_host([s])
+    random.seed(4)
+    crew = MaintenanceCrew(cfg, bh, start=0.0)
+    crew.next_visit["H"] = 100000.0  # routine far away
+    assert crew.forces(bh, 0.0) == {}  # arms the dispatch, no repair yet
+    due = crew.dispatch_due["H"]
+    assert 100.0 <= due <= 200.0
+    assert crew.forces(bh, due - 1) == {}
+    assert crew.forces(bh, due) == {("H", "k"): "good"}, "dispatch did not repair"
+    assert "H" not in crew.dispatch_due, "dispatch not cleared after repair"
+    assert crew.last_visit["H"] == due, "repair did not register as a visit (event marker)"
+    assert crew.next_visit["H"] == 100000.0, "dispatch must not touch the routine schedule"

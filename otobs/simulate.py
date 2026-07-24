@@ -6,8 +6,9 @@ re-rolls by the catalog weights. Sticky states produce long, smooth degradation
 stretches — the kind of Underperform curve Tahap 2/3 ML training needs, not flicker.
 
 catalog/sim_config.yml layers optional realism on top (correlation, trend,
-time-of-day, dropout, backfill). Every feature defaults OFF and is a strict no-op
-when disabled: with all of them off, output is identical to the plain state machine.
+time-of-day, dropout, backfill, ladder progression, maintenance visits). Every
+feature defaults OFF and is a strict no-op when disabled: with all of them off,
+output is identical to the plain state machine.
 """
 from __future__ import annotations
 import json
@@ -100,18 +101,25 @@ def sample_stream(s: "Stream", st: State, now: float, scale: float,
 
 
 def next_state(sim: Sim, cur: int | None, stickiness: float,
-               forced_idx: int | None = None) -> int:
+               forced_idx: int | None = None, ladder: bool = False) -> int:
     if forced_idx is not None:
         return forced_idx
     if cur is not None and random.random() < stickiness:
         return cur
     r, acc = random.random(), 0.0
     weights = sim.normalized_weights()
+    target = len(weights) - 1
     for i, w in enumerate(weights):
         acc += w
         if r <= acc:
-            return i
-    return len(weights) - 1
+            target = i
+            break
+    # Ladder: move one band toward the rolled target instead of teleporting.
+    # Catalog states are ordered good -> underperform -> failed, so degradation
+    # must pass through underperform and recovery can't skip it either.
+    if ladder and cur is not None and target != cur:
+        return cur + (1 if target > cur else -1)
+    return target
 
 
 def _idx_of_band(sim: Sim, band: str) -> int | None:
@@ -230,6 +238,72 @@ def correlation_forces(cfg: SimConfig, by_host: dict) -> dict:
 _BAND_RANK = {"good": 0, "underperform": 1, "failed": 2}
 
 
+class MaintenanceCrew:
+    """Routine PM visits (cfg.maintenance). Tracks per-host visit schedules on the
+    caller's clock (`now`): monotonic in the live loop, virtual epoch in backfill —
+    durations are divided by `scale` the same way stream intervals are.
+
+    forces() returns {(host, key): 'good'} for every failed stream on hosts whose
+    visit is due this tick, and re-arms the schedule. The absorbing-failed rule
+    lives in process_stream; together: nothing heals until the crew shows up,
+    then everything on the host heals at once.
+
+    ponytail: visits repair ALL hosts in the fleet (PLC/switch too, not just HMI);
+    scope per-asset-class if that ever matters."""
+
+    def __init__(self, cfg: SimConfig, hosts, start: float, scale: float = 1.0):
+        m = cfg.maintenance
+        self.cfg = m
+        self.scale = scale
+        self.last_visit: dict[str, float] = {}
+        self.dispatch_due: dict[str, float] = {}  # armed reactive visits per host
+        self.on_site: set[str] = set()  # hosts mid-repair: force until every stream consumes it
+        # stagger first visits across one interval so the fleet doesn't sync up
+        self.next_visit = {h: start + random.uniform(0, m.interval_s) / scale
+                           for h in hosts} if m.enabled else {}
+
+    def forces(self, by_host: dict, now: float) -> dict:
+        forced: dict = {}
+        if not self.cfg.enabled:
+            return forced
+        for host, sd in by_host.items():
+            failed = [key for key, s in sd.items() if s.state_idx is not None
+                      and s.param.sim.states[s.state_idx].band == "failed"]
+            # A visit only repairs streams processed on its tick, but slow
+            # (5m/1h) streams are usually not due then — so the tech stays
+            # on site, re-forcing 'good' until every failed stream has
+            # consumed the repair. Without this, slow streams miss the visit,
+            # stay failed, and re-trigger dispatch forever.
+            if host in self.on_site:
+                if not failed:
+                    self.on_site.discard(host)  # all fixed — leave site
+                else:
+                    for key in failed:
+                        forced[(host, key)] = "good"
+                continue
+            # reactive dispatch: first failure on a host arms an unscheduled visit
+            if self.cfg.dispatch and failed and host not in self.dispatch_due:
+                lo, hi = self.cfg.dispatch
+                self.dispatch_due[host] = now + random.uniform(lo, hi) / self.scale
+            routine = now >= self.next_visit.get(host, float("inf"))
+            if not (routine or now >= self.dispatch_due.get(host, float("inf"))):
+                continue
+            if routine:  # re-arm the schedule
+                j = self.cfg.jitter_s
+                self.next_visit[host] = now + (self.cfg.interval_s + random.uniform(-j, j)) / self.scale
+            self.dispatch_due.pop(host, None)  # any visit clears a pending dispatch
+            self.last_visit[host] = now
+            if failed:
+                self.on_site.add(host)
+                for key in failed:
+                    forced[(host, key)] = "good"
+        return forced
+
+    def visited_within(self, host: str, now: float, seconds: float) -> bool:
+        lv = self.last_visit.get(host)
+        return lv is not None and (now - lv) <= seconds / self.scale
+
+
 def segment_forces(assets: list[AssetClass], by_host: dict) -> dict:
     """{(host, circuit_key): band} forcing each comm-link circuit to the WORST
     current band of the physical segment(s) it rides — a hard, deterministic
@@ -262,7 +336,8 @@ def segment_forces(assets: list[AssetClass], by_host: dict) -> dict:
 
 
 def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
-                   forced: dict, hour: float, clock: float | None = None):
+                   forced: dict, hour: float, clock: float | None = None,
+                   maint: MaintenanceCrew | None = None):
     """Advance one due stream one tick. Returns the emitted value, or None if the
     reading was dropped. Shared by live run() and backfill(). Caller owns next_due.
 
@@ -281,15 +356,28 @@ def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
                 else _typed(raw, s.param.value_type))
         s.last_value = value
         return value
+    if (maint is not None and cfg.maintenance.event_key == s.param.key):
+        # CMMS work-order marker: 1 on the first reading after a visit, else 0.
+        # Driven by the crew's schedule, never the state machine.
+        visited = maint.visited_within(s.host, now, s.param.interval_s)
+        s.state_idx = _band_idx_for_value(s.param.sim, 1 if visited else 0)
+        s.last_value = 1 if visited else 0
+        return s.last_value
     fb = forced.get((s.host, s.param.key))
     forced_idx = _idx_of_band(s.param.sim, fb) if fb is not None else None
+    # Absorbing failed: with maintenance on, a failed stream stays failed until
+    # the crew forces it to 'good' — no self-heal, no correlation-bias escape.
+    if (cfg.maintenance.enabled and s.state_idx is not None and fb != "good"
+            and s.param.sim.states[s.state_idx].band == "failed"):
+        forced_idx = s.state_idx
     # MTTR dwell: a self-rolling stream can't leave its band until the window
     # expires — real repair time. Forced streams (segment-derived circuits) are
     # unaffected; they mirror their segment.
     if (forced_idx is None and cfg.hold.enabled and s.state_idx is not None
             and now < s.hold_until):
         forced_idx = s.state_idx
-    new_idx = next_state(s.param.sim, s.state_idx, settings.STICKINESS, forced_idx)
+    new_idx = next_state(s.param.sim, s.state_idx, settings.STICKINESS, forced_idx,
+                         cfg.progression.ladder)
     transitioned = new_idx != s.state_idx
     s.state_idx = new_idx
     if cfg.hold.enabled and transitioned:  # arm the dwell on entering a new band
@@ -297,12 +385,18 @@ def process_stream(s: Stream, now: float, scale: float, cfg: SimConfig,
         if win:
             s.hold_until = now + random.uniform(*win) / scale
     st = s.param.sim.states[new_idx]
+    # A monotonic counter repaired to 'good' is a part swap: it resets instantly
+    # (no ramp down, no clamp this tick). Otherwise it can only stay or rise.
+    reset = s.param.sim.monotonic and fb == "good"
     if (cfg.trend.enabled and s.param.sim.kind == "numeric"
-            and transitioned and s.last_value is not None):
+            and transitioned and s.last_value is not None and not reset):
         s.ramp_from = s.last_value
         s.ramp_to = random.uniform(st.lo, st.hi)
         s.ramp_start = now
     value = sample_stream(s, st, now, scale, cfg, hour)
+    if (s.param.sim.monotonic and not reset and s.last_value is not None
+            and isinstance(value, (int, float))):
+        value = max(value, s.last_value)
     s.last_value = value
     return value
 
@@ -320,6 +414,7 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
     by_host = _by_host(streams)
     sender = Sender(server=settings.SENDER_HOST, port=settings.SENDER_PORT)
     scale = max(settings.TIME_SCALE, 0.001)
+    maint = MaintenanceCrew(cfg, by_host, time.monotonic(), scale)
     feats = ", ".join(cfg.enabled_features()) or "none"
     log.info("Streaming %d items -> %s:%d (stickiness=%s, time_scale=%sx, sim-config: %s). "
              "Ctrl+C to stop.", len(streams), settings.SENDER_HOST, settings.SENDER_PORT,
@@ -369,10 +464,11 @@ def run(assets: list[AssetClass], cfg: SimConfig | None = None) -> None:
             hour = _hour(clock) if cfg.time_of_day.enabled else 0.0
             forced = correlation_forces(cfg, by_host)
             forced.update(segment_forces(assets, by_host))  # hard segment->circuit force wins
+            forced.update(maint.forces(by_host, now))  # repair visit beats everything
             batch, notes = [], []
             for s in due:
                 s.next_due = now + s.param.interval_s / scale
-                value = process_stream(s, now, scale, cfg, forced, hour, clock)
+                value = process_stream(s, now, scale, cfg, forced, hour, clock, maint)
                 if value is None:
                     continue
                 batch.append(ItemValue(s.host, s.send_key, str(value)))
@@ -436,6 +532,7 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     for s in streams:
         groups.setdefault(s.param.interval_s, []).append(s)
     group_due = {iv: start for iv in groups}
+    maint = MaintenanceCrew(cfg, by_host, start)  # backfill runs on real seconds (scale=1)
 
     log.info("Backfilling %gd for %d items at %gx -> %s:%d ...",
              days, len(streams), speed, settings.SENDER_HOST, settings.SENDER_PORT)
@@ -467,13 +564,14 @@ def run_backfill(assets: list[AssetClass], cfg: SimConfig | None = None,
     while group_due and vt < end:
         hour = _hour(vt) if cfg.time_of_day.enabled else 0.0
         forced = correlation_forces(cfg, by_host)
-        forced.update(segment_forces(assets, by_host))  
+        forced.update(segment_forces(assets, by_host))
+        forced.update(maint.forces(by_host, vt))  # repair visit beats everything
         for iv, due_t in group_due.items():
             if due_t > vt:
                 continue
             group_due[iv] = due_t + iv
             for s in groups[iv]:
-                value = process_stream(s, vt, 1.0, cfg, forced, hour, vt)
+                value = process_stream(s, vt, 1.0, cfg, forced, hour, vt, maint)
                 if value is not None:
                     batch.append(ItemValue(s.host, s.send_key, str(value), clock=int(vt)))
                     if len(batch) >= FLUSH:

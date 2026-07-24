@@ -94,6 +94,8 @@ parameters:
       failed: [200, 800]
       weights: [good, underperform, failed]
       jitter: 0
+      # Real SMART counters never decrease — only a disk swap (maintenance visit) resets them.
+      monotonic: true
     triggers:
       - { op: ">=", value: 1,   severity: warning, label: "Sectors reallocating — early media degradation" }
       - { op: ">=", value: 200, severity: high,    label: "Reallocation past firmware threshold" }
@@ -114,6 +116,25 @@ parameters:
         - { value: 0, weight: failed, label: "self_test_passed: FALSE — fatal media verdict" }
     triggers:
       - { op: "=", value: 0, severity: high, label: "SMART self-test FAILED" }
+
+  - key: "hmi.maintenance"
+    name: "Maintenance Visit"
+    value_type: unsigned
+    units: ""
+    interval: "1h"
+    component: "F. Maintenance"
+    collection: "derived (CMMS work-order log; sim: routine-visit marker)"
+    failure_mode: "n/a — preventive-maintenance marker, 1 on the reading after a site visit"
+    source: "PM schedule, 2x/month routine (Objective 1 maintenance model)"
+    # Driven by the maintenance engine (sim_config maintenance.event_key), never the
+    # state machine — with maintenance off it just sits at 0.
+    sim:
+      kind: enum
+      states:
+        - { value: 0, weight: good,   label: "no visit" }
+        - { value: 1, weight: 0.0001, label: "technician on site" }
+    triggers:
+      - { op: "=", value: 1, severity: info, label: "Routine maintenance visit" }
 
   - key: "hmi.nic.errors"
     name: "NIC Port Error Rate"
